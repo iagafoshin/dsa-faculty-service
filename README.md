@@ -1,26 +1,26 @@
 # DSA Faculty Service
 
-**DSA Faculty Service** is the faculty-data microservice of the **Digital Student Assistant (DSA)** platform. It aggregates profiles of HSE University faculty (scraped from hse.ru), their publications, and courses, and exposes them over a REST API. A sibling service (core DSA backend) consumes this API for the student-facing frontend.
+**DSA Faculty Service** — микросервис данных о НПР платформы **Digital Student Assistant (DSA)**. Агрегирует профили преподавателей НИУ ВШЭ (скрейпинг с hse.ru), их публикации и учебные курсы, и отдаёт их через REST API. Соседний сервис (ядро DSA-бэкенда) использует этот API для фронтенда студентов.
 
-- **Source of truth:** [`openapi.yaml`](./openapi.yaml) in repo root
-- **Live Swagger UI** (after `make up`): http://localhost:8000/docs
+- **Источник истины:** [`openapi.yaml`](./openapi.yaml) в корне репозитория
+- **Swagger UI** (после `make up`): http://localhost:8000/docs
 - **OpenAPI JSON:** http://localhost:8000/openapi.json
 
-## Stack
+## Стек
 
-Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · Postgres 16 · Alembic · `httpx` + `lxml` scraper · Docker · pytest.
+Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · Postgres 16 · Alembic · `httpx` + `lxml` для парсера · Docker · pytest.
 
-## Quickstart
+## Быстрый старт
 
 ```bash
 cp .env.example .env
 make up          # docker compose up -d
-make migrate     # alembic upgrade head (pg_trgm + all tables + campus seed)
-make seed        # loads data/sample_100_persons.json — 100 real HSE profiles
+make migrate     # alembic upgrade head (pg_trgm + все таблицы + сид кампусов)
+make seed        # грузит data/sample_100_persons.json — 100 реальных профилей ВШЭ
 open http://localhost:8000/docs
 ```
 
-Sanity checks:
+Проверочные запросы:
 
 ```bash
 curl -s http://localhost:8000/api/v1/persons/25477 | jq .publications_total
@@ -32,69 +32,69 @@ curl -s 'http://localhost:8000/api/v1/publications?author_person_id=25477' | jq 
 curl -s 'http://localhost:8000/api/v1/search?q=Абанкина' | jq '.total'
 ```
 
-## Running the scraper live
+## Запуск парсера «вживую»
 
-The scraper is ported from `data/hse_persons.ipynb` into `app/scraper/` as regular Python modules. It's wired behind the admin endpoint:
+Парсер перенесён из `data/hse_persons.ipynb` в `app/scraper/` как обычные Python-модули. Запускается через админ-эндпоинт:
 
 ```bash
-# kick off a background scrape (returns 202 + job_id)
+# запустить фоновый скрейп (возвращает 202 + job_id)
 curl -X POST "http://localhost:8000/api/v1/admin/scrape?limit=5&campus_id=1125608"
 
-# poll status
+# опрос статуса
 curl "http://localhost:8000/api/v1/admin/scrape/<job_id>"
 ```
 
-Or locally from the CLI:
+Или локально через CLI:
 
 ```bash
 make scrape   # docker compose exec app python scripts/run_scraper_local.py --limit=5
 ```
 
-## Status: v0.2 scope
+## Статус: объём v0.2
 
-**In MVP:** persons, publications, courses, lexical search (ILIKE + pg_trgm), health/ready, news feed (last publications), admin scrape endpoint.
+**В MVP:** профили, публикации, курсы, лексический поиск (ILIKE + pg_trgm), health/ready, лента новостей (последние публикации), админ-эндпоинт для парсера.
 
-**Deferred to v1.0+:**
-- NER-enriched interest/topic tags
-- Semantic search (OpenSearch + SciBERT)
-- `hse_portal` news source (separate parser)
-- Outbox events for downstream consumers
+**Отложено до v1.0+:**
+- NER-теги для интересов/тематик
+- Семантический поиск (OpenSearch + SciBERT)
+- Источник новостей `hse_portal` (отдельный парсер)
+- Outbox-события для внешних потребителей
 
-## Layout
+## Структура проекта
 
 ```
-openapi.yaml              # source of truth
+openapi.yaml              # источник истины
 app/
-  api/v1/                 # 14 endpoints, mounted under /api/v1
+  api/v1/                 # 14 эндпоинтов, смонтированы под /api/v1
   models/                 # SQLAlchemy ORM
-  schemas/                # Pydantic v2 models (match openapi.yaml exactly)
+  schemas/                # Pydantic v2 модели (строго по openapi.yaml)
   services/
-    mapping.py            # raw JSON ↔ DB-column refactor
-    ingest.py             # idempotent upserts
-    pagination.py         # Paginated[T] helper
-  scraper/                # ported from data/hse_persons.ipynb
-    parser.py             # all parse_* functions
-    publications.py       # publications.hse.ru/api/searchPubs client
+    mapping.py            # сырой JSON ↔ колонки БД
+    ingest.py             # идемпотентные upsert'ы
+    pagination.py         # хелпер Paginated[T]
+  scraper/                # порт data/hse_persons.ipynb
+    parser.py             # все функции parse_*
+    publications.py       # клиент publications.hse.ru/api/searchPubs
     profile.py            # scrape_one_profile(url) → dict
     crawler.py            # crawl_and_ingest()
-alembic/versions/         # initial migration (pg_trgm + all tables + campus seed)
+alembic/versions/         # начальная миграция (pg_trgm + таблицы + сид кампусов)
 scripts/
-  seed_from_sample.py     # loads data/sample_100_persons.json
-  run_scraper_local.py    # CLI wrapper around crawler
-tests/                    # smoke tests against seeded DB
+  seed_from_sample.py     # грузит data/sample_100_persons.json
+  run_scraper_local.py    # CLI-обёртка над краулером
+tests/                    # smoke-тесты по засиженной БД
 data/
-  sample_100_persons.json # real HSE data — anchor for seed + demo
-  hse_persons.ipynb       # original scraper prototype (reference only)
+  sample_100_persons.json # реальные данные ВШЭ — опора для сида и демо
+  hse_persons.ipynb       # исходный прототип парсера (для справки)
 ```
 
-## Role in DSA
+## Место в DSA
 
-Sibling microservice to the core DSA backend (`Digital-Student-Assistant` repo). This service owns the faculty / publications / courses domain; the core DSA service owns projects / applications / users. Integration is via the REST contract in [`openapi.yaml`](./openapi.yaml).
+Соседний микросервис ядра DSA-бэкенда (репозиторий `Digital-Student-Assistant`). Этот сервис отвечает за домен «преподаватели / публикации / курсы»; ядро DSA — за проекты / заявки / пользователей. Интеграция — через REST-контракт в [`openapi.yaml`](./openapi.yaml).
 
-## Tests
+## Тесты
 
 ```bash
 make test    # docker compose exec app pytest -v
 ```
 
-Covers all GET endpoints, the `person_id=25477` anchor (Абанкина, 181 publications), ordering, filtering, and the error path for unknown IDs.
+Покрывают все GET-эндпоинты, «якорь» `person_id=25477` (Абанкина, 181 публикация), сортировку, фильтрацию и ветки ошибок на несуществующих id.
