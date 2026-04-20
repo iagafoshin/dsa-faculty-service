@@ -34,6 +34,11 @@ def get_main_root(tree):
 
 def get_person_id(tree, url: str | None = None) -> int | None:
     if tree is not None:
+        for v in tree.xpath("//*[@data-author]/@data-author"):
+            s = str(v).strip()
+            if s.isdigit():
+                return int(s)
+
         vals = tree.xpath("//script[@data-person-id]/@data-person-id")
         for v in vals:
             s = str(v).strip()
