@@ -1,0 +1,568 @@
+openapi: 3.1.0
+
+info:
+  title: DSA Faculty Service API
+  version: 0.2.0
+  description: |
+    **DSA Faculty Service** — сервис агрегации и обогащения данных о научно-педагогических
+    работниках (НПР) НИУ ВШЭ для платформы **Digital Student Assistant**.
+
+    Отвечает за слой данных: сбор профилей с hse.ru и из скрытого API публикаций,
+    нормализация, хранение, выдача через REST.
+
+    **Статус:** draft v0.2. Источник истины — этот файл.
+
+    **Изменения v0.1 → v0.2:**
+    - `positions` — только должности (без `employment_addition`, `managers` вынесены в `relations`)
+    - `education` — только `degrees` + `extra_education`
+    - `awards`, `interests`, `grants`, `editorial_staff`, `conferences` — на верхнем уровне `Person`
+    - Публикации — отдельная сущность, many-to-many через `authorships`
+    - `/news` — лента последних публикаций + (позже) новостей портала
+    - `/admin/scrape` — запуск парсера из API (интеграция с Jupyter-логикой)
+  contact:
+    name: Ivan Agafoshin
+    url: https://github.com/<TBD>/dsa-faculty-service
+  license:
+    name: MIT
+
+servers:
+  - url: https://faculty.dsa.example.com/api/v1
+    description: Production TBD (subdomain on DSA domain)
+  - url: http://localhost:8000/api/v1
+    description: Local dev
+
+tags:
+  - { name: health,       description: Health & readiness }
+  - { name: persons,      description: Профили НПР }
+  - { name: publications, description: Научные публикации }
+  - { name: courses,      description: Учебные курсы }
+  - { name: search,       description: Поиск }
+  - { name: news,         description: Лента новостей }
+  - { name: meta,         description: Справочники }
+  - { name: admin,        description: Административные операции }
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/HealthResponse' }}}
+
+  /ready:
+    get:
+      tags: [health]
+      operationId: getReady
+      security: []
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReadyResponse' }}}
+        '503':
+          description: Not ready
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReadyResponse' }}}
+
+  /persons:
+    get:
+      tags: [persons]
+      summary: Список профилей
+      operationId: listPersons
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: q,                in: query, schema: { type: string } }
+        - { name: campus_id,        in: query, schema: { type: string } }
+        - { name: has_publications, in: query, schema: { type: boolean } }
+        - { name: language,         in: query, schema: { type: string } }
+        - name: ordering
+          in: query
+          schema:
+            type: string
+            enum: [full_name, -full_name, publications_total, -publications_total]
+            default: full_name
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/PaginatedPersonSummary' }}}
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /persons/{person_id}:
+    get:
+      tags: [persons]
+      summary: Карточка профиля
+      operationId: getPerson
+      parameters: [{ $ref: '#/components/parameters/PersonId' }]
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Person' }}}
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /persons/{person_id}/publications:
+    get:
+      tags: [persons, publications]
+      operationId: listPersonPublications
+      parameters:
+        - $ref: '#/components/parameters/PersonId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: year_from, in: query, schema: { type: integer, minimum: 1900 } }
+        - { name: year_to,   in: query, schema: { type: integer, minimum: 1900 } }
+        - { name: type,      in: query, schema: { $ref: '#/components/schemas/PublicationType' } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/PaginatedPublication' }}}
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /persons/{person_id}/courses:
+    get:
+      tags: [persons, courses]
+      operationId: listPersonCourses
+      parameters:
+        - $ref: '#/components/parameters/PersonId'
+        - { name: academic_year, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/PaginatedCourse' }}}
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /publications:
+    get:
+      tags: [publications]
+      summary: Глобальная лента публикаций
+      operationId: listPublications
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: q,                in: query, schema: { type: string } }
+        - { name: year_from,        in: query, schema: { type: integer } }
+        - { name: year_to,          in: query, schema: { type: integer } }
+        - { name: type,             in: query, schema: { $ref: '#/components/schemas/PublicationType' } }
+        - { name: author_person_id, in: query, schema: { type: integer } }
+        - name: ordering
+          in: query
+          schema:
+            type: string
+            enum: [year, -year, created_at, -created_at]
+            default: -created_at
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/PaginatedPublication' }}}
+
+  /publications/{pub_id}:
+    get:
+      tags: [publications]
+      operationId: getPublication
+      parameters: [{ name: pub_id, in: path, required: true, schema: { type: string }}]
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Publication' }}}
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /search:
+    get:
+      tags: [search]
+      summary: Унифицированный поиск
+      description: |
+        MVP: лексический поиск (ILIKE/trigram) по ФИО и названиям статей.
+        v2: семантический через OpenSearch + SciBERT.
+      operationId: search
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 2 } }
+        - name: type
+          in: query
+          schema: { type: string, enum: [all, persons, publications], default: all }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SearchResponse' }}}
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /news:
+    get:
+      tags: [news]
+      summary: Лента научных новостей
+      description: |
+        v1: объединённая лента из двух источников:
+        - `publication` — последние публикации сотрудников (из БД)
+        - `hse_portal` — новости портала hse.ru (добавляется отдельным парсером позже)
+
+        v2: NER-обогащение тем, фильтры по тематикам.
+      operationId: listNews
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: since,     in: query, schema: { type: string, format: date-time } }
+        - name: source
+          in: query
+          schema: { type: string, enum: [all, publication, hse_portal], default: all }
+        - { name: person_id, in: query, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/PaginatedNewsItem' }}}
+
+  /meta/campuses:
+    get:
+      tags: [meta]
+      operationId: listCampuses
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Campus' }
+
+  /meta/publication-types:
+    get:
+      tags: [meta]
+      operationId: listPublicationTypes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    code: { type: string, example: ARTICLE }
+                    label: { type: string, example: Научная статья }
+
+  /admin/scrape:
+    post:
+      tags: [admin]
+      summary: Запустить парсер профилей (из интегрированного Jupyter-кода)
+      description: Асинхронный фоновый запуск ETL. Для демо и локального наполнения БД.
+      operationId: runScrape
+      parameters:
+        - { name: limit,     in: query, schema: { type: integer, minimum: 1, maximum: 20000 } }
+        - { name: campus_id, in: query, schema: { type: string } }
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:              { type: string }
+                  status:              { type: string, enum: [queued, running] }
+                  estimated_profiles:  { type: integer }
+
+  /admin/scrape/{job_id}:
+    get:
+      tags: [admin]
+      operationId: getScrapeStatus
+      parameters: [{ name: job_id, in: path, required: true, schema: { type: string }}]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:       { type: string }
+                  status:       { type: string, enum: [queued, running, done, failed] }
+                  processed:    { type: integer }
+                  total:        { type: integer, nullable: true }
+                  error:        { type: string,  nullable: true }
+                  started_at:   { type: string,  format: date-time }
+                  finished_at:  { type: string,  format: date-time, nullable: true }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+
+  parameters:
+    Page:       { name: page,       in: query, schema: { type: integer, minimum: 1, default: 1 } }
+    PageSize:   { name: page_size,  in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+    PersonId:   { name: person_id,  in: path,  required: true, schema: { type: integer, example: 25477 } }
+
+  responses:
+    BadRequest:
+      description: Некорректный запрос
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' }}}
+    NotFound:
+      description: Ресурс не найден
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' }}}
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, version]
+      properties:
+        status:  { type: string, enum: [ok] }
+        version: { type: string, example: 0.2.0 }
+
+    ReadyResponse:
+      type: object
+      required: [status, checks]
+      properties:
+        status: { type: string, enum: [ok, degraded, down] }
+        checks:
+          type: object
+          properties:
+            db: { type: string, enum: [ok, down] }
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:    { type: string, example: not_found }
+        message: { type: string, example: Person not found }
+        detail:  { type: object, additionalProperties: true }
+
+    PaginationMeta:
+      type: object
+      required: [count, page, page_size]
+      properties:
+        count:     { type: integer }
+        page:      { type: integer }
+        page_size: { type: integer }
+        next:      { type: string, nullable: true, format: uri }
+        previous:  { type: string, nullable: true, format: uri }
+
+    # --- Person (refactored v0.2) ---
+    PersonSummary:
+      type: object
+      required: [person_id, full_name, profile_url]
+      properties:
+        person_id:          { type: integer, example: 25477 }
+        full_name:          { type: string,  example: "Абанкина Ирина Всеволодовна" }
+        avatar:             { type: string,  nullable: true, format: uri }
+        profile_url:        { type: string,  format: uri }
+        primary_unit:       { type: string,  nullable: true, example: "Институт образования" }
+        campus_name:        { type: string,  nullable: true }
+        publications_total: { type: integer, example: 181 }
+        languages:
+          type: array
+          items: { type: string }
+
+    Person:
+      description: |
+        Полная карточка. Схема v0.2: положения / образование / достижения / интересы /
+        научные активности разнесены по своим полям, а не свалены в `research`.
+      allOf:
+        - $ref: '#/components/schemas/PersonSummary'
+        - type: object
+          properties:
+            contacts:        { $ref: '#/components/schemas/Contacts' }
+            positions:
+              type: array
+              description: Только должности
+              items: { $ref: '#/components/schemas/Position' }
+            relations:       { $ref: '#/components/schemas/Relations' }
+            education:       { $ref: '#/components/schemas/Education' }
+            work_experience: { type: array, items: { type: string } }
+            awards:          { type: array, items: { type: string } }
+            interests:
+              type: array
+              description: Проф. интересы (v2 — NER-теги)
+              items: { type: string }
+            grants:
+              type: array
+              items: { $ref: '#/components/schemas/Grant' }
+            editorial_staff: { type: array, items: { type: string } }
+            conferences:     { type: array, items: { type: string } }
+            bio_notes:
+              type: array
+              description: Свободные заметки (ex-`employment_addition`)
+              items: { type: string }
+            research_ids:
+              type: object
+              additionalProperties: { type: string }
+            parsed_at: { type: string, format: date-time }
+
+    Contacts:
+      type: object
+      properties:
+        phones:        { type: string, nullable: true }
+        address:       { type: string, nullable: true }
+        hours:         { type: string, nullable: true }
+        timetable_url: { type: string, nullable: true, format: uri }
+
+    Position:
+      type: object
+      description: Только должность
+      properties:
+        title: { type: string, example: "Профессор:" }
+        units:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              url:  { type: string, nullable: true, format: uri }
+
+    Relations:
+      type: object
+      properties:
+        managers:
+          type: array
+          items: { $ref: '#/components/schemas/PersonRef' }
+
+    PersonRef:
+      type: object
+      properties:
+        person_id: { type: integer, nullable: true }
+        name:      { type: string }
+        url:       { type: string, nullable: true, format: uri }
+        role:      { type: string, nullable: true }
+
+    Education:
+      type: object
+      properties:
+        degrees:
+          type: array
+          items:
+            type: object
+            properties:
+              year: { type: integer, nullable: true }
+              text: { type: string }
+        extra_education:
+          type: array
+          items: { type: string }
+
+    Grant:
+      type: object
+      properties:
+        title: { type: string }
+        year:  { type: integer, nullable: true }
+        role:  { type: string, nullable: true }
+
+    Publication:
+      type: object
+      required: [id, title, type]
+      properties:
+        id:         { type: string, example: "1024092097" }
+        title:      { type: string }
+        type:       { $ref: '#/components/schemas/PublicationType' }
+        year:       { type: integer, nullable: true }
+        language:   { type: string,  nullable: true }
+        authors:
+          type: array
+          items: { $ref: '#/components/schemas/AuthorRef' }
+        url:        { type: string,  nullable: true, format: uri }
+        created_at: { type: string,  nullable: true, format: date-time }
+
+    PublicationType:
+      type: string
+      enum: [ARTICLE, BOOK, PREPRINT, CHAPTER, CONFERENCE, THESIS, OTHER]
+
+    AuthorRef:
+      type: object
+      properties:
+        person_id:    { type: integer, nullable: true }
+        display_name: { type: string, example: "Абанкина И. В." }
+        href:         { type: string, nullable: true }
+        position:     { type: integer, description: "0-based порядковый номер" }
+
+    Course:
+      type: object
+      properties:
+        title:         { type: string }
+        url:           { type: string, format: uri }
+        academic_year: { type: string, example: "2025/2026" }
+        language:      { type: string, example: "рус" }
+        level:         { type: string, nullable: true, example: "Магистратура" }
+        raw_meta:      { type: string }
+
+    NewsItem:
+      type: object
+      required: [id, title, published_at, source]
+      properties:
+        id:           { type: string }
+        title:        { type: string }
+        url:          { type: string, nullable: true, format: uri }
+        published_at: { type: string, format: date-time }
+        source:       { type: string, enum: [hse_portal, publication] }
+        person_ids:
+          type: array
+          items: { type: integer }
+        topics:
+          type: array
+          description: NER-теги (v2)
+          items: { type: string }
+
+    SearchHit:
+      type: object
+      properties:
+        type:        { type: string, enum: [person, publication] }
+        score:       { type: number, format: float }
+        person:      { $ref: '#/components/schemas/PersonSummary' }
+        publication: { $ref: '#/components/schemas/Publication' }
+
+    SearchResponse:
+      type: object
+      required: [query, results]
+      properties:
+        query:   { type: string }
+        total:   { type: integer }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/SearchHit' }
+
+    Campus:
+      type: object
+      required: [campus_id, campus_name]
+      properties:
+        campus_id:   { type: string }
+        campus_name: { type: string }
+
+    PaginatedPersonSummary:
+      allOf:
+        - $ref: '#/components/schemas/PaginationMeta'
+        - type: object
+          required: [results]
+          properties:
+            results:
+              type: array
+              items: { $ref: '#/components/schemas/PersonSummary' }
+
+    PaginatedPublication:
+      allOf:
+        - $ref: '#/components/schemas/PaginationMeta'
+        - type: object
+          required: [results]
+          properties:
+            results:
+              type: array
+              items: { $ref: '#/components/schemas/Publication' }
+
+    PaginatedCourse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationMeta'
+        - type: object
+          required: [results]
+          properties:
+            results:
+              type: array
+              items: { $ref: '#/components/schemas/Course' }
+
+    PaginatedNewsItem:
+      allOf:
+        - $ref: '#/components/schemas/PaginationMeta'
+        - type: object
+          required: [results]
+          properties:
+            results:
+              type: array
+              items: { $ref: '#/components/schemas/NewsItem' }
+
+security:
+  - {}
+  - bearerAuth: []
