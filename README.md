@@ -98,3 +98,5 @@ make test    # docker compose exec app pytest -v
 ```
 
 Покрывают все GET-эндпоинты, «якорь» `person_id=25477` (Абанкина, 181 публикация), сортировку, фильтрацию и ветки ошибок на несуществующих id.
+
+Production: https://faculty.agafoshin.ru/docs
