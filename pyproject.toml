@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dsa-faculty-service"
+version = "0.2.0"
+description = "DSA Faculty Service — faculty-data microservice of the Digital Student Assistant platform"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Ivan Agafoshin", email = "ivan@agafoshin.com" }]
+dependencies = [
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "SQLAlchemy>=2.0.30",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "psycopg2-binary>=2.9",
+    "httpx>=0.27",
+    "requests>=2.32",
+    "lxml>=5.2",
+    "python-dateutil>=2.9",
+    "orjson>=3.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "anyio>=4.4",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["tests*", "scripts*", "alembic*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
