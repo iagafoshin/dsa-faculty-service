@@ -9,11 +9,12 @@ from app.scraper.client import BASE_URL, get
 from app.scraper.publications import fetch_all
 
 
-def scrape_one_profile(url: str, base_url: str = BASE_URL) -> dict[str, Any] | None:
-    resp = get(url)
-    tree = parser.make_tree(resp.text)
+def _compose(tree, url: str, base_url: str, publications_enabled: bool) -> dict[str, Any]:
+    """Assemble the final dict from a parsed tree. Split out from the network
+    fetch so fixture tests can exercise the full composition.
+    """
     if tree is None:
-        return None
+        return {}
 
     person_id = parser.get_person_id(tree, url=url)
     full_name = parser.parse_full_name(tree)
@@ -22,7 +23,7 @@ def scrape_one_profile(url: str, base_url: str = BASE_URL) -> dict[str, Any] | N
     contacts = parser.parse_contacts(tree, base_url=base_url) or {}
     managers = parser.parse_managers(tree, base_url=base_url) or []
     research_ids = parser.parse_research_ids(tree, base_url=base_url) or {}
-    employment = parser.parse_employment(tree, base_url=base_url) or []
+    positions = parser.parse_positions(tree, base_url=base_url) or []
     employment_traits = parser.parse_employment_traits(tree) or []
     employment_addition = parser.parse_employment_addition(tree) or []
     degrees = parser.parse_degrees(tree) or []
@@ -39,7 +40,7 @@ def scrape_one_profile(url: str, base_url: str = BASE_URL) -> dict[str, Any] | N
 
     publications: list[dict[str, Any]] = []
     publications_total = 0
-    if person_id is not None:
+    if publications_enabled and person_id is not None:
         try:
             pubs, total = fetch_all(person_id, per_page=50)
             publications = pubs
@@ -62,7 +63,7 @@ def scrape_one_profile(url: str, base_url: str = BASE_URL) -> dict[str, Any] | N
         },
         "contacts": contacts,
         "positions": {
-            "employment": employment,
+            "employment": positions,
             "employment_traits": employment_traits,
             "employment_addition": employment_addition,
             "managers": managers,
@@ -84,3 +85,19 @@ def scrape_one_profile(url: str, base_url: str = BASE_URL) -> dict[str, Any] | N
         },
         "news": news,
     }
+
+
+def scrape_from_tree(tree, url: str, base_url: str = BASE_URL) -> dict[str, Any]:
+    """Parse an already-loaded lxml tree into the profile dict (no network).
+
+    Used by fixture tests. Skips the publications hidden-API call.
+    """
+    return _compose(tree, url=url, base_url=base_url, publications_enabled=False)
+
+
+def scrape_one_profile(url: str, base_url: str = BASE_URL) -> dict[str, Any] | None:
+    resp = get(url)
+    tree = parser.make_tree(resp.text)
+    if tree is None:
+        return None
+    return _compose(tree, url=url, base_url=base_url, publications_enabled=True)
