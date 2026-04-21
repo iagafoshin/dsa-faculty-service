@@ -720,6 +720,99 @@ def parse_conferences(tree, base_url: str = "https://www.hse.ru") -> list[dict[s
 
 
 # ---------------------------------------------------------------------------
+# Patents — new section extracted from <table class="patent_table">
+# ---------------------------------------------------------------------------
+
+_PATENT_TITLE_MAP = {
+    "Номер РИД": "number",
+    "Вид РИД": "kind",
+    "Наименование РИД": "title",
+    "Сведения о регистрации": "registration",
+    "Авторы": "authors",
+    "Год": "year",
+    "№ п/п": "index",
+}
+
+
+def _patent_cell_value(td, base_url: str = "https://www.hse.ru") -> dict[str, Any] | str | None:
+    """Collapse a patent `<td>` into a text (+ optional url) representation."""
+    links = td.xpath(".//a[@href]")
+    text = clean_text(td.text_content())
+    if not text:
+        return None
+    if links:
+        href = links[0].get("href")
+        if href:
+            href = urljoin(base_url, href)
+        return {"text": text, "url": href}
+    return text
+
+
+def parse_patents(tree, base_url: str = "https://www.hse.ru") -> list[dict[str, Any]]:
+    """Extract entries from the `<table class="patent_table">` (patents block).
+
+    Each row → one dict. Fields are keyed by English names derived from the
+    `data-title` attribute on each `<td>`. A cell that contains a link becomes
+    `{"text": ..., "url": ...}`; other cells are plain strings.
+    A top-level `year` is derived from the registration cell if a 4-digit
+    year is present there, else left `None`.
+    """
+    main_el = get_main_root(tree)
+    out: list[dict[str, Any]] = []
+    if main_el is None:
+        return out
+
+    tables = main_el.xpath(
+        ".//div[contains(@class,'b-person-data') and @tab-node='patents']"
+        "//table[contains(@class,'patent_table')]"
+    )
+    for table in tables:
+        for tr in table.xpath(".//tr[contains(@class,'patent_table__item')]"):
+            row: dict[str, Any] = {}
+            for td in tr.xpath("./td[@data-title]"):
+                label = clean_text(td.get("data-title"))
+                if not label:
+                    continue
+                key = _PATENT_TITLE_MAP.get(label, label.lower())
+                row[key] = _patent_cell_value(td, base_url=base_url)
+
+            # If there's no data-title, fall back to column position — but
+            # skip rows with only a № column as header-ish rows.
+            if not row:
+                continue
+            # Split "Авторы" into a list of author names when present.
+            authors_raw = row.get("authors")
+            if isinstance(authors_raw, str):
+                names = [clean_text(n) for n in re.split(r"[,;]", authors_raw)]
+                row["authors"] = [n for n in names if n]
+            elif isinstance(authors_raw, dict):
+                names = [clean_text(n) for n in re.split(r"[,;]", authors_raw.get("text", ""))]
+                row["authors"] = [n for n in names if n]
+            else:
+                row["authors"] = []
+
+            # Year extraction from the registration field.
+            reg = row.get("registration")
+            year: int | None = None
+            reg_text: str | None = None
+            if isinstance(reg, dict):
+                reg_text = reg.get("text")
+            elif isinstance(reg, str):
+                reg_text = reg
+            if reg_text:
+                m = re.search(r"\b(19|20)\d{2}\b", reg_text)
+                if m:
+                    try:
+                        year = int(m.group(0))
+                    except ValueError:
+                        year = None
+            row["year"] = year
+
+            out.append(row)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # News
 # ---------------------------------------------------------------------------
 

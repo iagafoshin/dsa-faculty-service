@@ -36,6 +36,7 @@ def _compose(tree, url: str, base_url: str, publications_enabled: bool) -> dict[
     grants = parser.parse_grants(tree) or []
     editorial_staff = parser.parse_editorial_staff(tree) or []
     conferences = parser.parse_conferences(tree, base_url=base_url) or []
+    patents = parser.parse_patents(tree, base_url=base_url) or []
     news = parser.parse_news(tree, base_url=base_url) or []
 
     publications: list[dict[str, Any]] = []
@@ -84,6 +85,7 @@ def _compose(tree, url: str, base_url: str, publications_enabled: bool) -> dict[
             "publications": publications,
         },
         "news": news,
+        "patents": patents,
     }
 
 
