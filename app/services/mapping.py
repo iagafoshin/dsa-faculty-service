@@ -145,6 +145,8 @@ def person_from_raw(raw: dict[str, Any]) -> dict[str, Any]:
     grants = [_grant_to_dict(g) for g in research_block.get("grants") or []]
     editorial = [s for s in (_editorial_to_str(x) for x in research_block.get("editorial_staff") or []) if s]
     conferences = [s for s in (_conference_to_str(x) for x in research_block.get("conferences") or []) if s]
+    patents_raw = raw.get("patents") or []
+    patents = [p for p in patents_raw if isinstance(p, dict)]
 
     return {
         "person_id": int(meta["person_id"]),
@@ -178,6 +180,7 @@ def person_from_raw(raw: dict[str, Any]) -> dict[str, Any]:
         "conferences": conferences,
         "bio_notes": positions_block.get("employment_addition") or [],
         "research_ids": research_ids,
+        "patents": patents,
         "parsed_at": _parse_iso(meta.get("parsed_at")),
     }
 

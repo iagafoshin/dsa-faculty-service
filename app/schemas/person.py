@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -60,6 +61,21 @@ class Grant(BaseModel):
     role: str | None = None
 
 
+class Patent(BaseModel):
+    """A patent / RID entry scraped from the "Авторские права и патенты" table.
+
+    All fields are optional because the source table can have irregular rows.
+    ``number`` and ``registration`` may carry a URL alongside the visible
+    text, in which case the value is serialized as ``{"text": ..., "url": ...}``.
+    """
+    title: str | None = None
+    number: Any = None
+    kind: str | None = None
+    registration: Any = None
+    authors: list[str] = []
+    year: int | None = None
+
+
 class Person(PersonSummary):
     contacts: Contacts = Contacts()
     positions: list[Position] = []
@@ -73,4 +89,5 @@ class Person(PersonSummary):
     conferences: list[str] = []
     bio_notes: list[str] = []
     research_ids: dict[str, str] = {}
+    patents: list[Patent] = []
     parsed_at: datetime | None = None

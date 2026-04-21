@@ -63,6 +63,7 @@ def _person_to_full(p: Person, campus_name: str | None) -> PersonSchema:
         conferences=list(p.conferences or []),
         bio_notes=list(p.bio_notes or []),
         research_ids={k: str(v) for k, v in (p.research_ids or {}).items()},
+        patents=list(p.patents or []),
         parsed_at=p.parsed_at,
     )
 
