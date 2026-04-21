@@ -14,6 +14,7 @@ from app.schemas.person import Person as PersonSchema
 from app.schemas.person import PersonSummary
 from app.schemas.publication import AuthorRef, Publication as PublicationSchema, PublicationType
 from app.services.pagination import paginate
+from app.services.publication_enrichment import enrich_publication
 
 router = APIRouter()
 
@@ -184,10 +185,13 @@ async def list_person_publications(
             )
 
     results = [
-        PublicationSchema(
-            id=p.id, title=p.title, type=PublicationType(p.type),
-            year=p.year, language=p.language, authors=authors_map.get(p.id, []),
-            url=p.url, created_at=p.created_at,
+        enrich_publication(
+            PublicationSchema(
+                id=p.id, title=p.title, type=PublicationType(p.type),
+                year=p.year, language=p.language, authors=authors_map.get(p.id, []),
+                url=p.url, created_at=p.created_at,
+            ),
+            p.raw,
         )
         for p in pubs
     ]

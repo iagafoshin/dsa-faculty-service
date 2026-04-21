@@ -9,6 +9,7 @@ from app.models import Authorship, Publication
 from app.schemas.envelopes import PaginatedPublication
 from app.schemas.publication import AuthorRef, Publication as PublicationSchema, PublicationType
 from app.services.pagination import paginate
+from app.services.publication_enrichment import enrich_publication
 
 router = APIRouter()
 
@@ -88,10 +89,13 @@ async def list_publications(
     authors_map = await _attach_authors(db, pubs)
 
     results = [
-        PublicationSchema(
-            id=p.id, title=p.title, type=PublicationType(p.type),
-            year=p.year, language=p.language,
-            authors=authors_map.get(p.id, []), url=p.url, created_at=p.created_at,
+        enrich_publication(
+            PublicationSchema(
+                id=p.id, title=p.title, type=PublicationType(p.type),
+                year=p.year, language=p.language,
+                authors=authors_map.get(p.id, []), url=p.url, created_at=p.created_at,
+            ),
+            p.raw,
         )
         for p in pubs
     ]
@@ -110,8 +114,9 @@ async def get_publication(pub_id: str, db: AsyncSession = Depends(get_db)) -> Pu
             detail={"code": "not_found", "message": f"Publication {pub_id} not found"},
         )
     authors_map = await _attach_authors(db, [pub])
-    return PublicationSchema(
+    base = PublicationSchema(
         id=pub.id, title=pub.title, type=PublicationType(pub.type),
         year=pub.year, language=pub.language,
         authors=authors_map.get(pub.id, []), url=pub.url, created_at=pub.created_at,
     )
+    return enrich_publication(base, pub.raw)
