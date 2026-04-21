@@ -385,6 +385,10 @@ components:
             research_ids:
               type: object
               additionalProperties: { type: string }
+            patents:
+              type: array
+              description: Патенты и РИД, извлечённые из таблицы «Авторские права и патенты»
+              items: { $ref: '#/components/schemas/Patent' }
             parsed_at: { type: string, format: date-time }
 
     Contacts:
@@ -443,6 +447,35 @@ components:
         title: { type: string }
         year:  { type: integer, nullable: true }
         role:  { type: string, nullable: true }
+
+    Patent:
+      type: object
+      description: |
+        Одна запись из таблицы РИД. Поля `number` и `registration` могут быть
+        строкой или объектом `{text, url}` — в зависимости от наличия ссылки.
+      properties:
+        title:        { type: string,  nullable: true }
+        kind:         { type: string,  nullable: true, example: "Изобретение" }
+        number:
+          nullable: true
+          oneOf:
+            - { type: string }
+            - type: object
+              properties:
+                text: { type: string }
+                url:  { type: string, format: uri }
+        registration:
+          nullable: true
+          oneOf:
+            - { type: string }
+            - type: object
+              properties:
+                text: { type: string }
+                url:  { type: string, format: uri }
+        authors:
+          type: array
+          items: { type: string }
+        year:         { type: integer, nullable: true }
 
     Publication:
       type: object
