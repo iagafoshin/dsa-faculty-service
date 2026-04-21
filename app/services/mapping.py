@@ -11,6 +11,7 @@ from typing import Any
 from dateutil import parser as dateparser
 
 from app.schemas.publication import PublicationType
+from app.scraper.normalizers import extract_person_id_from_url
 
 _PUB_TYPES = {t.value for t in PublicationType}
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
@@ -87,13 +88,9 @@ def _research_id_to_str(v: Any) -> str:
 
 def _manager_to_ref(raw: dict[str, Any]) -> dict[str, Any]:
     url = raw.get("url") or ""
-    person_id: int | None = None
-    m = re.search(r"/persons/(\d+)", url)
-    if m:
-        try:
-            person_id = int(m.group(1))
-        except ValueError:
-            person_id = None
+    person_id = raw.get("person_id")
+    if person_id is None:
+        person_id = extract_person_id_from_url(url)
     return {
         "person_id": person_id,
         "name": raw.get("name") or "",

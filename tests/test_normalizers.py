@@ -1,12 +1,49 @@
 import pytest
 
 from app.scraper.normalizers import (
+    extract_person_id_from_url,
     normalize_award,
     normalize_conference_string,
     normalize_phone,
     normalize_position_title,
     normalize_work_experience,
 )
+
+
+# ---------------------------------------------------------------------------
+# extract_person_id_from_url
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("https://www.hse.ru/staff/414353659/", 414353659),
+        ("https://www.hse.ru/staff/414353659", 414353659),
+        ("https://www.hse.ru/org/persons/859153138", 859153138),
+        ("https://www.hse.ru/org/persons/859153138/", 859153138),
+        ("https://www.hse.ru/staff/414353659/?ref=abc", 414353659),
+        ("https://www.hse.ru/org/persons/859153138?utm=x", 859153138),
+        ("https://www.hse.ru/en/staff/123/", 123),
+        ("https://www.hse.ru/en/org/persons/456/", 456),
+    ],
+)
+def test_extract_person_id_from_url_valid(url, expected):
+    assert extract_person_id_from_url(url) == expected
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        None,
+        "",
+        "https://example.com/",
+        "https://www.hse.ru/staff/spekarski/",
+        "https://www.hse.ru/some/other/path/123",
+        "not a url",
+    ],
+)
+def test_extract_person_id_from_url_invalid(url):
+    assert extract_person_id_from_url(url) is None
 
 
 # ---------------------------------------------------------------------------
