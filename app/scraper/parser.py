@@ -16,6 +16,7 @@ from urllib.parse import urljoin, urlparse
 from lxml import html
 
 from app.scraper.normalizers import (
+    extract_person_id_from_url,
     normalize_award,
     normalize_conference_string,
     normalize_phone,
@@ -235,7 +236,12 @@ def parse_managers(tree, base_url: str = "https://www.hse.ru"):
                 url = dd.xpath(".//a/@href")
                 url = urljoin(base_url, url[0]) if url else None
                 role = clean_text("".join(dd.xpath(".//span[contains(@class,'grey')]/text()")))
-                managers.append({"name": name, "url": url, "role": role})
+                managers.append({
+                    "person_id": extract_person_id_from_url(url),
+                    "name": name,
+                    "url": url,
+                    "role": role,
+                })
     return managers
 
 

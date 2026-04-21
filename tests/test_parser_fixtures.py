@@ -196,6 +196,41 @@ def test_technical_neznanov_work_experience_has_year_prefixes():
     assert len(year_prefixed) >= 3
 
 
+def test_manager_person_id_extracted_from_url():
+    """Managers should carry a person_id parsed from their profile URL."""
+    tree = _load_fixture("econ_semenikhin")
+    result = scrape_from_tree(tree, url="https://www.hse.ru/org/persons/101503035")
+    managers = result["positions"]["managers"]
+    assert managers, "expected at least one manager in fixture"
+    target = next(
+        (m for m in managers if (m.get("url") or "").endswith("/13869964/")),
+        None,
+    )
+    assert target is not None, f"expected /13869964/ manager, got {managers}"
+    assert target["person_id"] == 13869964
+
+
+def test_admin_aleskerov_manager_person_ids_by_url_shape():
+    """/org/persons/<digits> yields int; /staff/<non-numeric-slug> yields None."""
+    tree = _load_fixture("admin_aleskerov")
+    result = scrape_from_tree(tree, url="https://www.hse.ru/org/persons/140159")
+    managers = result["positions"]["managers"]
+    org_persons = next(
+        (m for m in managers if "/org/persons/" in (m.get("url") or "")),
+        None,
+    )
+    assert org_persons is not None
+    assert isinstance(org_persons["person_id"], int)
+    non_numeric_staff = next(
+        (m for m in managers
+         if "/staff/" in (m.get("url") or "")
+         and not (m["url"].rstrip("/").split("/")[-1]).isdigit()),
+        None,
+    )
+    if non_numeric_staff is not None:
+        assert non_numeric_staff["person_id"] is None
+
+
 def test_staff_slug_without_id_still_parses_name():
     """Profiles hosted at /staff/<slug> may lack numeric IDs but still have a name."""
     for tag in ("staff_slug_empty", "staff_slug_minimal", "staff_slug_no_id"):

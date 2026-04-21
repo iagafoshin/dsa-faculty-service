@@ -11,12 +11,36 @@ from typing import Any
 
 __all__ = [
     "clean_whitespace",
+    "extract_person_id_from_url",
     "normalize_position_title",
     "normalize_work_experience",
     "normalize_conference_string",
     "normalize_phone",
     "normalize_award",
 ]
+
+
+_PERSON_ID_URL_RE = re.compile(r"/(?:staff|org/persons)/(\d+)")
+
+
+def extract_person_id_from_url(url: str | None) -> int | None:
+    """Extract HSE person_id from a profile URL.
+
+    Supports both URL formats used by HSE:
+    - /staff/{id}
+    - /org/persons/{id}
+
+    Returns None if url is None, empty, or doesn't match expected pattern.
+    """
+    if not url:
+        return None
+    m = _PERSON_ID_URL_RE.search(url)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except ValueError:
+        return None
 
 
 def clean_whitespace(s: str | None) -> str:
