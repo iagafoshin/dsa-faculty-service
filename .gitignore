@@ -24,3 +24,6 @@ hse_persons*.json
 
 # Alembic version scratch (keep committed migrations)
 alembic/versions/__pycache__/
+
+# Local scraper fixtures (raw, unsanitized HTML — sanitized copies live in tests/fixtures/html)
+tmp/
