@@ -1,0 +1,229 @@
+# Expected values for each sanitized fixture in tests/fixtures/html/.
+#
+# Values were derived by parsing the checked-in fixtures and spot-checking
+# the resulting dicts against the actual HSE pages. Counts are encoded as
+# minima (`*_min`) so tolerant parser tweaks don't cause flakes; if a parser
+# change drops a section entirely the corresponding assertion will fail.
+#
+# person_id == null means the fixture has no numeric ID in its DOM (those
+# are /staff/<slug> pages whose slug is not numeric).
+
+rich_humanities_abankina_i:
+  url: "https://www.hse.ru/org/persons/25477"
+  person_id: 25477
+  full_name: "Абанкина Ирина Всеволодовна"
+  positions_min: 2
+  awards_min: 15
+  has_conferences: true
+  conferences_min: 50
+  has_patents: false
+  work_experience_entries_min: 2
+
+rich_humanities_abankina_t:
+  url: "https://www.hse.ru/org/persons/203662"
+  person_id: 203662
+  full_name: "Абанкина Татьяна Всеволодовна"
+  positions_min: 2
+  awards_min: 10
+  has_conferences: true
+  conferences_min: 20
+  has_patents: false
+  work_experience_entries_min: 5
+
+rich_sociology_abramov:
+  url: "https://www.hse.ru/org/persons/63703"
+  person_id: 63703
+  full_name: "Абрамов Роман Николаевич"
+  positions_min: 2
+  awards_min: 10
+  has_conferences: true
+  has_patents: false
+  work_experience_entries_min: 5
+
+technical_ilvovsky:
+  url: "https://www.hse.ru/org/persons/25911955"
+  person_id: 25911955
+  full_name: "Ильвовский Дмитрий Алексеевич"
+  positions_min: 2
+  awards_min: 5
+  has_conferences: true
+  has_patents: false
+  work_experience_entries_min: 1
+  grants_min: 1
+
+technical_neznanov:
+  url: "https://www.hse.ru/org/persons/4113483"
+  person_id: 4113483
+  full_name: "Незнанов Алексей Андреевич"
+  positions_min: 2
+  awards_min: 5
+  has_conferences: false
+  has_patents: true
+  patents_min: 1
+  work_experience_entries_min: 5
+
+math_kuznetsov:
+  url: "https://www.hse.ru/org/persons/139837"
+  person_id: 139837
+  full_name: "Кузнецов Сергей Олегович"
+  positions_min: 3
+  awards_min: 15
+  has_conferences: true
+  has_patents: false
+  work_experience_entries_min: 3
+  grants_min: 1
+
+math_mirkin:
+  url: "https://www.hse.ru/org/persons/3954058"
+  person_id: 3954058
+  full_name: "Миркин Борис Григорьевич"
+  positions_min: 2
+  awards_min: 10
+  has_conferences: true
+  has_patents: true
+  work_experience_entries_min: 5
+  grants_min: 3
+
+technical_gromov:
+  url: "https://www.hse.ru/org/persons/224066548"
+  person_id: 224066548
+  full_name: "Громов Василий Александрович"
+  positions_min: 2
+  awards_min: 5
+  has_conferences: true
+  has_patents: true
+  patents_min: 3
+  # Experience is a single prose paragraph on this profile (year appears
+  # inline, not as an entry prefix) — structural split yields 1 entry.
+  work_experience_entries_min: 1
+
+supervisor_siwaev:
+  url: "https://www.hse.ru/org/persons/204488"
+  person_id: 204488
+  full_name: "Сиваев Сергей Борисович"
+  positions_min: 1
+  awards_min: 3
+  has_conferences: true
+  has_patents: false
+
+supervisor_parinov:
+  url: "https://www.hse.ru/org/persons/16338072"
+  person_id: 16338072
+  full_name: "Паринов Андрей Андреевич"
+  positions_min: 2
+  awards_min: 1
+  has_conferences: true
+  has_patents: false
+  work_experience_entries_min: 1
+
+staff_slug_aspirant_with_pubs:
+  url: "https://www.hse.ru/staff/kamron"
+  person_id: 305052829
+  full_name: "Абдулхаев Камрон Сирожиддинович"
+  positions_min: 1
+  awards_min: 0
+  has_conferences: false
+  has_patents: false
+  grants_min: 2
+
+staff_slug_with_interests:
+  url: "https://www.hse.ru/staff/AlexanderABD"
+  person_id: 305052776
+  full_name: "Абдуллаев Александр Максимович"
+  positions_min: 2
+  awards_min: 1
+  has_conferences: true
+  has_patents: false
+
+staff_slug_minimal:
+  url: "https://www.hse.ru/staff/abolina"
+  person_id: null
+  full_name: "Аболина Наталья Александровна"
+  positions_min: 1
+  awards_min: 5
+  has_conferences: false
+  has_patents: false
+
+staff_slug_empty:
+  url: "https://www.hse.ru/staff/aaa"
+  person_id: null
+  full_name: "Антонян Анна Артуровна"
+  positions_min: 1
+  awards_min: 0
+  has_conferences: false
+  has_patents: false
+
+staff_slug_no_id:
+  url: "https://www.hse.ru/staff/abdulkhakimov"
+  person_id: null
+  full_name: "Абдулхакимов Мухиддин"
+  positions_min: 1
+  awards_min: 0
+  has_conferences: false
+  has_patents: false
+
+econ_gusev:
+  url: "https://www.hse.ru/org/persons/60953"
+  person_id: 60953
+  full_name: "Гусев Денис Александрович"
+  positions_min: 1
+  awards_min: 3
+  has_conferences: true
+  has_patents: false
+
+econ_semenikhin:
+  url: "https://www.hse.ru/org/persons/101503035"
+  person_id: 101503035
+  full_name: "Авдеенко Надежда Александровна"
+  positions_min: 2
+  awards_min: 1
+  has_patents: true
+
+math_lepskiy:
+  url: "https://www.hse.ru/org/persons/10586209"
+  person_id: 10586209
+  full_name: "Лепский Александр Евгеньевич"
+  positions_min: 2
+  awards_min: 5
+  has_conferences: true
+  has_patents: false
+  grants_min: 1
+
+possibly_foreign:
+  url: "https://www.hse.ru/org/persons/10440730"
+  person_id: 10440730
+  full_name: "Анашвили Валериан Валерианович"
+  positions_min: 2
+  awards_min: 1
+  has_patents: false
+  work_experience_entries_min: 5
+
+admin_aleskerov:
+  url: "https://www.hse.ru/org/persons/140159"
+  person_id: 140159
+  full_name: "Алескеров Фуад Тагиевич"
+  positions_min: 2
+  awards_min: 15
+  has_conferences: true
+  has_patents: true
+  patents_min: 5
+
+education_maksimenkova:
+  url: "https://www.hse.ru/org/persons/3626661"
+  person_id: 3626661
+  full_name: "Максименкова Ольга Вениаминовна"
+  positions_min: 2
+  awards_min: 3
+  has_conferences: true
+  has_patents: true
+  patents_min: 3
+
+education_papushina:
+  url: "https://www.hse.ru/org/persons/7161403"
+  person_id: 7161403
+  full_name: "Папушина Юлия Олеговна"
+  positions_min: 1
+  awards_min: 1
+  has_conferences: true
+  has_patents: false
+  grants_min: 2
