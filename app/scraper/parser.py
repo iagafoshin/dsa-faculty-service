@@ -1,12 +1,32 @@
-"""Ported verbatim from data/hse_persons.ipynb. All parse_* functions live here."""
+"""HSE person-profile HTML → structured dict.
+
+The file is organized as `parse_<section>(tree)` functions plus a handful of
+utilities. Each `parse_*` is independent and tolerant of missing DOM: returns
+an empty result rather than raising. Known DOM variants are handled inline
+(tab-node first, then heading-based fallback). See
+`docs/html_structure_analysis.md` for the variant playbook.
+"""
 from __future__ import annotations
 
 import datetime
 import re
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from lxml import html
 
+from app.scraper.normalizers import (
+    normalize_award,
+    normalize_conference_string,
+    normalize_phone,
+    normalize_position_title,
+    normalize_work_experience,
+)
+
+
+# ---------------------------------------------------------------------------
+# Low-level helpers
+# ---------------------------------------------------------------------------
 
 def clean_text(s):
     if not s:
@@ -62,6 +82,18 @@ def get_person_id(tree, url: str | None = None) -> int | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Header / identity
+# ---------------------------------------------------------------------------
+
+def parse_full_name(tree):
+    main_el = get_main_root(tree)
+    if main_el is not None:
+        name_el = main_el.xpath(".//h1[contains(@class,'person-caption')]/text()")
+        return clean_text(name_el[0]) if name_el else None
+    return None
+
+
 def parse_avatar(tree, base_url: str = "https://www.hse.ru"):
     avatar = None
     side_el = get_sidebar_root(tree)
@@ -87,6 +119,19 @@ def parse_languages(tree):
     return languages
 
 
+def parse_header(tree, base_url: str = "https://www.hse.ru") -> dict[str, Any]:
+    """Convenience wrapper — identity block used by scrape_one_profile."""
+    return {
+        "full_name": parse_full_name(tree),
+        "avatar": parse_avatar(tree, base_url=base_url),
+        "languages": parse_languages(tree) or [],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Contacts
+# ---------------------------------------------------------------------------
+
 def parse_contacts(tree, base_url: str = "https://www.hse.ru"):
     contacts = {"phones": None, "address": None, "hours": None, "timetable_url": None}
 
@@ -106,7 +151,10 @@ def parse_contacts(tree, base_url: str = "https://www.hse.ru"):
             texts = [clean_text(t) for t in phone_dd.xpath(".//text()") if clean_text(t)]
             phones = [t for t in texts if not t.startswith("Телефон")]
             if phones:
-                contacts["phones"] = " | ".join(phones)
+                # Join then re-split so comma-separated variants collapse cleanly.
+                joined = ", ".join(phones)
+                parts = normalize_phone(joined)
+                contacts["phones"] = " | ".join(parts) if parts else None
 
         addr_dd = dl.xpath(".//dd[contains(@class,'address-with-hours')]")
         if addr_dd:
@@ -133,6 +181,10 @@ def parse_contacts(tree, base_url: str = "https://www.hse.ru"):
 
     return contacts
 
+
+# ---------------------------------------------------------------------------
+# Research IDs, managers
+# ---------------------------------------------------------------------------
 
 def parse_research_ids(tree, base_url: str = "https://www.hse.ru"):
     research_ids = {}
@@ -187,34 +239,49 @@ def parse_managers(tree, base_url: str = "https://www.hse.ru"):
     return managers
 
 
-def parse_full_name(tree):
+# ---------------------------------------------------------------------------
+# Positions (employment) — splits comma-joined titles
+# ---------------------------------------------------------------------------
+
+def parse_positions(tree, base_url: str = "https://www.hse.ru") -> list[dict[str, Any]]:
+    """Return one dict per individual title, with shared unit links.
+
+    Single-title pages stay as before (one entry). Multi-title `<li>` like
+    `"руководитель департамента, профессор:"` becomes two entries sharing the
+    same `units` list.
+    """
     main_el = get_main_root(tree)
-    if main_el is not None:
-        name_el = main_el.xpath(".//h1[contains(@class,'person-caption')]/text()")
-        return clean_text(name_el[0]) if name_el else None
-    return None
+    if main_el is None:
+        return []
+    positions: list[dict[str, Any]] = []
+    ul_list = main_el.xpath(".//ul[contains(@class,'employment-add')]")
+    if not ul_list:
+        return positions
+    ul = ul_list[0]
+    for li in ul.xpath("./li"):
+        raw_title = clean_text("".join(
+            li.xpath(".//span[contains(@class,'person-appointment-title')]/text()")
+        ))
+        if not raw_title:
+            # LIs without an appointment title (e.g. class="i" bio-note lines)
+            # are excluded here — they are surfaced via parse_employment_addition.
+            continue
+        units: list[dict[str, Any]] = []
+        for a in li.xpath(".//a[@class='link']"):
+            unit_name = clean_text(a.text_content())
+            href = a.get("href")
+            if href:
+                href = urljoin(base_url, href)
+            units.append({"name": unit_name, "url": href})
+        titles = normalize_position_title(raw_title) or [raw_title.rstrip(":").strip()]
+        for t in titles:
+            positions.append({"title": t, "units": list(units)})
+    return positions
 
 
+# Legacy alias kept so existing callers (profile.py, mapping.py) remain valid.
 def parse_employment(tree, base_url: str = "https://www.hse.ru"):
-    main_el = get_main_root(tree)
-    employment = []
-    if main_el is not None:
-        ul_list = main_el.xpath(".//ul[contains(@class,'employment-add')]")
-        if ul_list:
-            ul = ul_list[0]
-            for li in ul.xpath("./li"):
-                title = clean_text("".join(
-                    li.xpath(".//span[contains(@class,'person-appointment-title')]/text()")
-                ))
-                units = []
-                for a in li.xpath(".//a[@class='link']"):
-                    unit_name = clean_text(a.text_content())
-                    href = a.get("href")
-                    if href:
-                        href = urljoin(base_url, href)
-                    units.append({"name": unit_name, "url": href})
-                employment.append({"title": title, "units": units})
-    return employment
+    return parse_positions(tree, base_url=base_url)
 
 
 def parse_employment_traits(tree):
@@ -242,6 +309,10 @@ def parse_employment_addition(tree):
                     addition.append(txt)
     return addition
 
+
+# ---------------------------------------------------------------------------
+# Education
+# ---------------------------------------------------------------------------
 
 def parse_degrees(tree):
     main_el = get_main_root(tree)
@@ -273,6 +344,14 @@ def parse_degrees(tree):
     return degrees
 
 
+def parse_education(tree) -> dict[str, Any]:
+    """Convenience wrapper for the education block."""
+    return {
+        "degrees": parse_degrees(tree) or [],
+        "extra_education": parse_extra_education(tree) or [],
+    }
+
+
 def parse_professional_interests(tree, base_url: str = "https://www.hse.ru"):
     main_el = get_main_root(tree)
     interests = []
@@ -289,6 +368,11 @@ def parse_professional_interests(tree, base_url: str = "https://www.hse.ru"):
                 if label:
                     interests.append({"label": label, "url": href})
     return interests
+
+
+# Alias for the brief's signature.
+def parse_interests(tree, base_url: str = "https://www.hse.ru"):
+    return parse_professional_interests(tree, base_url=base_url)
 
 
 def parse_extra_education(tree):
@@ -320,20 +404,112 @@ def parse_extra_education(tree):
     return extra_ed
 
 
-def parse_awards(tree):
+# ---------------------------------------------------------------------------
+# Awards — uses normalize_award to parse optional year range
+# ---------------------------------------------------------------------------
+
+def parse_awards(tree) -> list[str]:
+    """Return award entries as cleaned strings.
+
+    Each `<li>` may carry one or many award mentions. We keep the item as a
+    single string (the existing API contract) but pass it through
+    ``normalize_award`` so callers can retrieve structured title/year range
+    via ``normalize_award(item)``. The raw item text is preserved.
+    """
     main_el = get_main_root(tree)
-    awards = []
-    if main_el is not None:
-        award_blocks = main_el.xpath(
-            ".//div[contains(@class,'b-person-data') and @tab-node='awards']"
-        )
-        for block in award_blocks:
-            for li in block.xpath(".//ul[contains(@class,'g-list')]/li"):
-                txt = clean_text(li.text_content())
-                if txt:
-                    awards.append(txt)
+    awards: list[str] = []
+    if main_el is None:
+        return awards
+    award_blocks = main_el.xpath(
+        ".//div[contains(@class,'b-person-data') and @tab-node='awards']"
+    )
+    for block in award_blocks:
+        for li in block.xpath(".//ul[contains(@class,'g-list')]/li"):
+            txt = clean_text(li.text_content())
+            if txt:
+                awards.append(txt)
     return awards
 
+
+def parse_awards_structured(tree) -> list[dict[str, Any]]:
+    """Same as parse_awards but returns structured dicts via normalize_award.
+
+    Not wired into scrape_one_profile yet — reserved for a future API upgrade.
+    """
+    return [normalize_award(s) for s in parse_awards(tree)]
+
+
+# ---------------------------------------------------------------------------
+# Work experience — split big blobs by year patterns
+# ---------------------------------------------------------------------------
+
+def _collect_experience_blob(tree) -> str:
+    """Concatenate all experience text from the ``experience`` tab-node.
+
+    Paragraph and with-indent block boundaries become single spaces. Per-p
+    joining is critical because the HSE DOM frequently emits the year and
+    the position text as *separate* sibling `<p>` tags — splitting the blob
+    by year pattern only works on a single long string.
+    """
+    main_el = get_main_root(tree)
+    if main_el is None:
+        return ""
+    chunks: list[str] = []
+    for block in main_el.xpath(
+        ".//div[contains(@class,'b-person-data') and @tab-node='experience']"
+    ):
+        paragraphs = block.xpath(
+            ".//div[contains(@class,'with-indent')]//p[contains(@class,'text')]"
+        )
+        if paragraphs:
+            for p in paragraphs:
+                txt = clean_text(p.text_content())
+                if txt:
+                    chunks.append(txt)
+        else:
+            for div in block.xpath(".//div[contains(@class,'with-indent')]"):
+                txt = clean_text(div.text_content())
+                if txt:
+                    chunks.append(txt)
+    return " ".join(chunks).strip()
+
+
+def parse_work_experience(tree) -> list[str]:
+    """Return per-entry strings for the experience section.
+
+    The DOM may place year and position text in separate sibling `<p>` tags,
+    so we concatenate the section text first and let
+    ``normalize_work_experience`` split by year patterns. Each returned
+    string is formatted as ``"years: position"`` when a year span was found,
+    else the raw text.
+    """
+    blob = _collect_experience_blob(tree)
+    if not blob:
+        return []
+    out: list[str] = []
+    for piece in normalize_work_experience(blob):
+        years = piece.get("years") or ""
+        position = piece.get("position") or ""
+        if years and position:
+            out.append(f"{years}: {position}")
+        elif position:
+            out.append(position)
+        elif years:
+            out.append(years)
+    return out
+
+
+def parse_work_experience_structured(tree) -> list[dict[str, str]]:
+    """Same as parse_work_experience but returns the `{years, position}` dicts."""
+    blob = _collect_experience_blob(tree)
+    if not blob:
+        return []
+    return normalize_work_experience(blob)
+
+
+# ---------------------------------------------------------------------------
+# Teaching — theses, courses
+# ---------------------------------------------------------------------------
 
 def parse_theses(tree, base_url: str = "https://www.hse.ru"):
     return []
@@ -379,48 +555,93 @@ def parse_courses(tree, base_url: str = "https://www.hse.ru"):
     return courses
 
 
-def parse_grants(tree):
-    main_el = get_main_root(tree)
-    grants = []
-    if main_el is None:
-        return grants
-    grant_blocks = main_el.xpath(
-        ".//div[contains(@class,'b-person-data') and @tab-node='grants']"
-    )
-    for block in grant_blocks:
-        for li in block.xpath(".//ol/li | .//ul/li"):
-            txt = clean_text(li.text_content())
-            if not txt:
-                continue
-            grant_number = None
-            m_num = re.search(r"Номер:\s*([^,]+)", txt)
-            if m_num:
-                grant_number = clean_text(m_num.group(1))
+# ---------------------------------------------------------------------------
+# Research — grants, editorial, conferences
+# ---------------------------------------------------------------------------
+
+def _iter_grant_items(block):
+    """Yield cleaned strings for each `<li>` inside a grants block."""
+    for li in block.xpath(".//ol/li | .//ul/li"):
+        txt = clean_text(li.text_content())
+        if txt:
+            yield txt
+
+
+def _grant_from_text(txt: str) -> dict[str, Any]:
+    grant_number = None
+    m_num = re.search(r"Номер:\s*([^,]+)", txt)
+    if m_num:
+        grant_number = clean_text(m_num.group(1))
+    years = None
+    year_matches = re.findall(r"(\d{4})\s*г", txt)
+    if year_matches:
+        try:
+            if len(year_matches) == 1:
+                y = int(year_matches[0])
+                years = {"start": y, "end": y}
+            else:
+                years = {"start": int(year_matches[0]), "end": int(year_matches[-1])}
+        except Exception:
             years = None
-            year_matches = re.findall(r"(\d{4})\s*г", txt)
-            if year_matches:
-                try:
-                    if len(year_matches) == 1:
-                        y = int(year_matches[0])
-                        years = {"start": y, "end": y}
-                    else:
-                        years = {"start": int(year_matches[0]), "end": int(year_matches[-1])}
-                except Exception:
-                    years = None
-            grants.append({"text": txt, "number": grant_number, "years": years})
+    # Fallback: en-dash range without "г", e.g. "(2023–2026 гг.)"
+    if years is None:
+        m_range = re.search(r"(\d{4})\s*[–\-−—]\s*(\d{4})", txt)
+        if m_range:
+            try:
+                years = {"start": int(m_range.group(1)), "end": int(m_range.group(2))}
+            except ValueError:
+                years = None
+    return {"text": txt, "number": grant_number, "years": years}
+
+
+def parse_grants(tree) -> list[dict[str, Any]]:
+    """Return grants, trying tab-node first and falling back to heading-based DOM.
+
+    Variant A: `<div tab-node="grants">` with `<ul>/<ol>` of `<li>`.
+    Variant B: `<h2>Гранты</h2>` / `<h2>Исследовательские проекты и гранты</h2>`
+               followed by `<div class="with-indent">` with `<p class="text">`
+               paragraphs.
+    """
+    main_el = get_main_root(tree)
+    if main_el is None:
+        return []
+    grants: list[dict[str, Any]] = []
+
+    # Variant A — tab-node container
+    for block in main_el.xpath(
+        ".//div[contains(@class,'b-person-data') and @tab-node='grants']"
+    ):
+        for txt in _iter_grant_items(block):
+            grants.append(_grant_from_text(txt))
+    if grants:
+        return grants
+
+    # Variant B — heading-based fallback. We match any h2 whose normalized
+    # text contains "ранты" (Гранты / гранты), which covers the two observed
+    # phrasings on the site.
+    for h in main_el.xpath(".//h2[contains(translate(text(),'Г','г'),'ранты')]"):
+        nxt = h.xpath("./following-sibling::*[1]")
+        if not nxt:
+            continue
+        container = nxt[0]
+        paragraphs = container.xpath(".//p[contains(@class,'text')]") or [container]
+        for p in paragraphs:
+            txt = clean_text(p.text_content())
+            if txt:
+                grants.append(_grant_from_text(txt))
     return grants
 
 
-def parse_editorial_staff(tree):
+def parse_editorial_staff(tree) -> list[dict[str, Any]]:
     main_el = get_main_root(tree)
-    editorial_staff = []
+    out: list[dict[str, Any]] = []
     if main_el is None:
-        return editorial_staff
+        return out
     blocks = main_el.xpath(
         ".//div[contains(@class,'b-person-data') and @tab-node='editorial-staff']"
     )
     if not blocks:
-        return editorial_staff
+        return out
     block = blocks[0]
     for div in block.xpath(".//div[contains(@class,'with-indent')]"):
         txt = clean_text(div.text_content())
@@ -437,28 +658,35 @@ def parse_editorial_staff(tree):
         m_journal = re.search(r"«([^»]+)»", txt)
         if m_journal:
             journal = clean_text(m_journal.group(1))
-        editorial_staff.append({"text": txt, "start_year": start_year, "journal": journal})
-    return editorial_staff
+        out.append({"text": txt, "start_year": start_year, "journal": journal})
+    return out
 
 
-def parse_conferences(tree, base_url: str = "https://www.hse.ru"):
+def parse_conferences(tree, base_url: str = "https://www.hse.ru") -> list[dict[str, Any]]:
+    """Return per-conference dicts.
+
+    The DOM year hangover populates `year`. The `<p>` body is additionally
+    split via ``normalize_conference_string`` into ``title``/``location``/
+    ``talk_title`` fields. The legacy ``description`` field is preserved so
+    existing callers (e.g. ``mapping.py._conference_to_str``) keep working.
+    """
     main_el = get_main_root(tree)
-    conferences = []
+    out: list[dict[str, Any]] = []
     if main_el is None:
-        return conferences
+        return out
     blocks = main_el.xpath(
         ".//div[contains(@class,'b-person-data') and @tab-node='conferences']"
     )
     if not blocks:
-        return conferences
+        return out
     block = blocks[0]
-    last_year = None
+    last_year: int | None = None
     for ul in block.xpath(".//ul[contains(@class,'g-list_closer')]"):
         for li in ul.xpath(".//li[contains(@class,'li2')]"):
             year_el = li.xpath(".//div[contains(@class,'person-list-hangover')]/text()")
             if year_el:
                 year_raw = clean_text(year_el[0])
-                year = None
+                year: int | None = None
                 if year_raw:
                     try:
                         year = int(year_raw)
@@ -467,6 +695,7 @@ def parse_conferences(tree, base_url: str = "https://www.hse.ru"):
                 last_year = year
             else:
                 year = last_year
+
             p = li.xpath(".//p")[0] if li.xpath(".//p") else li
             description = clean_text(p.text_content())
             links = []
@@ -476,27 +705,23 @@ def parse_conferences(tree, base_url: str = "https://www.hse.ru"):
                     href = urljoin(base_url, href)
                 link_text = clean_text(a.text_content()) or None
                 links.append({"url": href, "text": link_text})
-            if description:
-                conferences.append({"year": year, "description": description, "links": links})
-    return conferences
-
-
-def parse_work_experience(tree):
-    main_el = get_main_root(tree)
-    work_experience = []
-    if main_el is None:
-        return work_experience
-    exp_blocks = main_el.xpath(
-        ".//div[contains(@class,'b-person-data') and @tab-node='experience']"
-    )
-    for block in exp_blocks:
-        for div in block.xpath(".//div[contains(@class,'with-indent')]"):
-            txt = clean_text(div.text_content())
-            if not txt:
+            if not description:
                 continue
-            work_experience.append(txt)
-    return work_experience
+            structured = normalize_conference_string(description, year=year)
+            out.append({
+                "year": year,
+                "description": description,
+                "title": structured.get("title"),
+                "location": structured.get("location"),
+                "talk_title": structured.get("talk_title"),
+                "links": links,
+            })
+    return out
 
+
+# ---------------------------------------------------------------------------
+# News
+# ---------------------------------------------------------------------------
 
 RU_MONTHS = {
     "янв.": 1, "фев.": 2, "мар.": 3, "апр.": 4, "май": 5, "июнь": 6,
