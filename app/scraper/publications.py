@@ -1,4 +1,4 @@
-"""Fetch publications from publications.hse.ru hidden API."""
+"""Запрос публикаций к скрытому API publications.hse.ru."""
 from __future__ import annotations
 
 from typing import Any

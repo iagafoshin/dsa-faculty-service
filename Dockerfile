@@ -15,12 +15,11 @@ WORKDIR /code
 
 COPY pyproject.toml /code/pyproject.toml
 COPY README.md /code/README.md
-RUN pip install --upgrade pip && pip install ".[dev]"
+RUN pip install --upgrade pip && pip install .
 
 COPY app /code/app
 COPY alembic /code/alembic
 COPY alembic.ini /code/alembic.ini
-COPY scripts /code/scripts
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

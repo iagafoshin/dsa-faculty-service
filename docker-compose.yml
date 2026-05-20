@@ -28,11 +28,8 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - ./app:/code/app
-      - ./scripts:/code/scripts
       - ./alembic:/code/alembic
       - ./alembic.ini:/code/alembic.ini
-      - ./data:/code/data
-      - ./tests:/code/tests
 
 volumes:
   pgdata:

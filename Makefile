@@ -1,4 +1,4 @@
-.PHONY: up down logs migrate revision seed scrape test shell psql fmt build
+.PHONY: up down logs migrate revision scrape shell psql fmt build
 
 up:
 	docker compose up -d
@@ -18,14 +18,8 @@ migrate:
 revision:
 	docker compose exec app alembic revision --autogenerate -m "$(m)"
 
-seed:
-	docker compose exec app python scripts/seed_from_sample.py
-
 scrape:
-	docker compose exec app python scripts/run_scraper_local.py --limit=5
-
-test:
-	docker compose exec app pytest -v
+	docker compose exec app python -m app.scraper --limit=5
 
 shell:
 	docker compose exec app python
