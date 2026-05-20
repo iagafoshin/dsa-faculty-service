@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: DSA Faculty Service API
-  version: 0.2.0
+  version: 0.4.0
   description: |
     **DSA Faculty Service** — сервис агрегации и обогащения данных о научно-педагогических
     работниках (НПР) НИУ ВШЭ для платформы **Digital Student Assistant**.
@@ -244,12 +244,30 @@ paths:
   /admin/scrape:
     post:
       tags: [admin]
-      summary: Запустить парсер профилей (из интегрированного Jupyter-кода)
-      description: Асинхронный фоновый запуск ETL. Для демо и локального наполнения БД.
+      summary: Start a scrape job
+      description: |
+        Enqueues a background HSE profile scrape and returns the new `job_id` immediately.
+        Poll `GET /admin/scrape/{job_id}` for progress.
       operationId: runScrape
+      security: [{ adminToken: [] }]
       parameters:
-        - { name: limit,     in: query, schema: { type: integer, minimum: 1, maximum: 20000 } }
-        - { name: campus_id, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 20000 } }
+        - name: campus_ids
+          in: query
+          description: HSE campus IDs (1125608=Moscow, 1125609=SPb, 1125610=NN, 1125611=Perm). Empty = all.
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { type: string }
+        - name: letters
+          in: query
+          description: First letters of surnames (Cyrillic А, Б, ...). Empty = all.
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { type: string }
       responses:
         '202':
           description: Accepted
@@ -261,31 +279,52 @@ paths:
                   job_id:              { type: string }
                   status:              { type: string, enum: [queued, running] }
                   estimated_profiles:  { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /admin/scrape/{job_id}:
     get:
       tags: [admin]
+      summary: Get scrape job status
       operationId: getScrapeStatus
+      security: [{ adminToken: [] }]
       parameters: [{ name: job_id, in: path, required: true, schema: { type: string }}]
       responses:
         '200':
           description: OK
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  job_id:       { type: string }
-                  status:       { type: string, enum: [queued, running, done, failed] }
-                  processed:    { type: integer }
-                  total:        { type: integer, nullable: true }
-                  error:        { type: string,  nullable: true }
-                  started_at:   { type: string,  format: date-time }
-                  finished_at:  { type: string,  format: date-time, nullable: true }
+              schema: { $ref: '#/components/schemas/ScrapeJobStatus' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/scrape/{job_id}/cancel:
+    post:
+      tags: [admin]
+      summary: Cancel a scrape job
+      description: |
+        Signals a queued or running job to stop. The job moves to `cancelling` first and to
+        `cancelled` once the crawler picks up the signal. Returns 409 if the job already finished.
+      operationId: cancelScrape
+      security: [{ adminToken: [] }]
+      parameters: [{ name: job_id, in: path, required: true, schema: { type: string }}]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScrapeJobStatus' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+    adminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+      description: Static admin token. Required for all `/admin/*` routes.
 
   parameters:
     Page:       { name: page,       in: query, schema: { type: integer, minimum: 1, default: 1 } }
@@ -294,10 +333,16 @@ components:
 
   responses:
     BadRequest:
-      description: Некорректный запрос
+      description: Bad request
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' }}}
+    Unauthorized:
+      description: Missing or invalid admin token
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' }}}
     NotFound:
-      description: Ресурс не найден
+      description: Resource not found
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' }}}
+    Conflict:
+      description: Conflict with current resource state (e.g. cancelling a finished job)
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' }}}
 
   schemas:
@@ -306,7 +351,19 @@ components:
       required: [status, version]
       properties:
         status:  { type: string, enum: [ok] }
-        version: { type: string, example: 0.2.0 }
+        version: { type: string, example: 0.4.0 }
+
+    ScrapeJobStatus:
+      type: object
+      required: [job_id, status, processed, started_at]
+      properties:
+        job_id:       { type: string }
+        status:       { type: string, enum: [queued, running, done, failed, cancelling, cancelled] }
+        processed:    { type: integer }
+        total:        { type: integer, nullable: true }
+        error:        { type: string,  nullable: true }
+        started_at:   { type: string,  format: date-time }
+        finished_at:  { type: string,  format: date-time, nullable: true }
 
     ReadyResponse:
       type: object

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from datetime import datetime, timezone
 from urllib.parse import urljoin
@@ -13,6 +14,8 @@ from app.scraper import parser
 from app.scraper.client import BASE_URL, get
 from app.scraper.ingest import upsert_person
 from app.scraper.profile import scrape_one_profile
+
+logger = logging.getLogger(__name__)
 
 START_URL = "https://www.hse.ru/org/persons/"
 
@@ -68,6 +71,7 @@ def list_profile_urls(
             try:
                 t = _fetch_tree(letter_url)
             except Exception:
+                logger.warning("failed to fetch letter page %s", letter_url, exc_info=True)
                 continue
             for href in t.xpath("//div[contains(@class, 'content__person-text')]//a/@href"):
                 full = urljoin(BASE_URL, href)
@@ -138,6 +142,7 @@ async def crawl_and_ingest(
                 try:
                     raw = await asyncio.to_thread(scrape_one_profile, url)
                 except Exception:
+                    logger.warning("failed to scrape profile %s", url, exc_info=True)
                     raw = None
                 if raw is not None:
                     if cid is not None:
@@ -145,6 +150,7 @@ async def crawl_and_ingest(
                     try:
                         await upsert_person(s, raw)
                     except Exception:
+                        logger.warning("upsert_person failed for %s", url, exc_info=True)
                         await s.rollback()
                 processed += 1
 

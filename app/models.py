@@ -12,6 +12,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -73,6 +74,11 @@ class Person(Base, TimestampMixin):
     research_ids: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
     patents: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
 
+    interests_extracted: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"),
+    )
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
+
     parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     campus = relationship("Campus", lazy="joined")
@@ -102,6 +108,10 @@ class Publication(Base):
     url: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     raw: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    topics: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"),
+    )
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

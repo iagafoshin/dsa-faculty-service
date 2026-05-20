@@ -457,7 +457,11 @@ async def search(
             select(Person, Campus.campus_name)
             .outerjoin(Campus, Person.campus_id == Campus.campus_id)
             .where(Person.full_name.ilike(pattern))
-            .order_by(Person.publications_total.desc(), Person.full_name.asc())
+            .order_by(
+                func.similarity(Person.full_name, q).desc(),
+                Person.publications_total.desc(),
+                Person.full_name.asc(),
+            )
             .limit(p_limit).offset(p_offset)
         )
         for p, campus_name in (await db.execute(stmt)).all():
@@ -476,7 +480,11 @@ async def search(
         stmt = (
             select(Publication)
             .where(Publication.title.ilike(pattern))
-            .order_by(Publication.year.desc().nullslast(), Publication.id.asc())
+            .order_by(
+                func.similarity(Publication.title, q).desc(),
+                Publication.year.desc().nullslast(),
+                Publication.id.asc(),
+            )
             .limit(remaining).offset(pub_offset)
         )
         for pub in (await db.execute(stmt)).scalars().all():

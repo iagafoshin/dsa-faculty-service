@@ -1,12 +1,16 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    ports:
+      # Биндим на localhost, чтобы локальный venv мог достучаться
+      # (NLP-CLI запускается с воркстейшна, не из контейнера).
+      - "127.0.0.1:5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 3s
@@ -23,6 +27,7 @@ services:
       APP_NAME: ${APP_NAME}
       APP_VERSION: ${APP_VERSION}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "127.0.0.1:8000:8000"

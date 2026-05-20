@@ -5,10 +5,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_name: str = "dsa-faculty-service"
-    app_version: str = "0.2.0"
+    app_version: str = "0.4.0"
     database_url: str = "postgresql+asyncpg://postgres:postgres@db:5432/hse_faculty"
     cors_origins: str = "*"
     log_level: str = "INFO"
+    admin_token: str | None = None
 
     @property
     def cors_origin_list(self) -> list[str]:

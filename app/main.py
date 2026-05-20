@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -6,6 +8,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.admin import router as admin_router
 from app.config import settings
 from app.routes import router as v1_router
+
+logging.basicConfig(
+    level=settings.log_level,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 _STATUS_CODES = {
     400: "bad_request",

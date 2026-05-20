@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dsa-faculty-service"
-version = "0.2.0"
+version = "0.4.0"
 description = "DSA Faculty Service — faculty-data microservice of the Digital Student Assistant platform"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -24,6 +24,19 @@ dependencies = [
     "lxml>=5.2",
     "python-dateutil>=2.9",
     "orjson>=3.10",
+    "pgvector>=0.3",
+]
+
+# Тяжёлые NLP-зависимости. Нужны только для локального enrich-CLI
+# (`python -m app.nlp enrich-persons` и т.п.). Прод-Dockerfile их не ставит
+# — там они просто не нужны (CLI запускается с воркстейшна разработчика).
+[project.optional-dependencies]
+nlp = [
+    "torch>=2.2",
+    "sentence-transformers>=3.0",
+    "spacy>=3.7",
+    "keybert>=0.8",
+    "tqdm>=4.66",
 ]
 
 [tool.setuptools.packages.find]
