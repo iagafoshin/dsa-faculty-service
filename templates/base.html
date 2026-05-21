@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}DSA Faculty{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .chip { display:inline-block; padding: 2px 8px; border-radius: 9999px;
+            background: #eef2ff; color: #3730a3; font-size: 0.75rem;
+            margin: 1px 2px; }
+    .progress { background: #e5e7eb; height: 6px; border-radius: 3px; overflow:hidden; }
+    .progress > div { background: #4f46e5; height: 100%; }
+    .truncate-2 { display:-webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<nav class="sticky top-0 z-10 bg-white shadow-sm border-b border-slate-200">
+  <div class="max-w-6xl mx-auto px-4 h-14 flex items-center gap-6">
+    <a href="/" class="font-bold text-lg text-indigo-700">🎓 DSA Faculty</a>
+    <a href="/" class="text-sm text-slate-600 hover:text-indigo-700">🎯 Подбор научрука</a>
+    <a href="/persons" class="text-sm text-slate-600 hover:text-indigo-700">👥 Преподаватели</a>
+    <a href="/publications" class="text-sm text-slate-600 hover:text-indigo-700">📚 Публикации</a>
+    <div class="ml-auto text-xs text-slate-400">
+      <a href="/docs" class="hover:text-slate-600">API docs</a>
+    </div>
+  </div>
+</nav>
+
+<main class="max-w-6xl mx-auto px-4 py-8">
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="text-center text-xs text-slate-400 py-8">
+  Источник данных: hse.ru · контракт: <a href="/docs" class="underline">/docs</a>
+</footer>
+
+</body>
+</html>

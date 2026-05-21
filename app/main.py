@@ -9,6 +9,7 @@ from app.admin import router as admin_router
 from app.config import settings
 from app.experts import router as experts_router
 from app.routes import router as v1_router
+from app.ui import router as ui_router
 
 logging.basicConfig(
     level=settings.log_level,
@@ -58,17 +59,13 @@ async def http_exception_handler(request, exc: StarletteHTTPException):
     )
 
 
-app.include_router(v1_router, prefix="/api/v1")
+# experts_router зарегистрирован ПЕРЕД v1_router, чтобы конкретные пути
+# вроде /publications/semantic-search не перехватывались более общим
+# /publications/{pub_id} из v1_router.
 app.include_router(experts_router, prefix="/api/v1")
+app.include_router(v1_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1/admin")
 
-
-@app.get("/", include_in_schema=False)
-async def root():
-    return {
-        "service": settings.app_name,
-        "version": settings.app_version,
-        "docs": "/docs",
-        "openapi": "/openapi.json",
-        "api": "/api/v1",
-    }
+# HTML UI на корневых путях (/, /persons, /publications, /persons/{id}).
+# JSON API остаётся под /api/v1/.
+app.include_router(ui_router)

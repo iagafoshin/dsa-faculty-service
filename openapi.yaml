@@ -187,6 +187,26 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/SearchResponse' }}}
         '400': { $ref: '#/components/responses/BadRequest' }
 
+  /courses:
+    get:
+      tags: [courses]
+      summary: Search courses across all instructors
+      description: |
+        ILIKE-search by course title across all teachers. Returns each course
+        with brief instructor info (name, primary unit, avatar). Optional
+        filters by `academic_year` and `language`.
+      operationId: searchCourses
+      parameters:
+        - { name: q,             in: query, required: true, schema: { type: string, minLength: 2 }, example: "машинное обучение" }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: academic_year, in: query, schema: { type: string }, example: "2025/2026" }
+        - { name: language,      in: query, schema: { type: string }, example: "ru" }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/PaginatedCourseHit' }}}
+
   /news:
     get:
       tags: [news]
@@ -685,6 +705,30 @@ components:
             results:
               type: array
               items: { $ref: '#/components/schemas/Course' }
+
+    CourseHit:
+      type: object
+      required: [course_id, title, person_id, person_name]
+      properties:
+        course_id:      { type: integer }
+        title:          { type: string }
+        academic_year:  { type: string, nullable: true }
+        language:       { type: string, nullable: true }
+        level:          { type: string, nullable: true }
+        person_id:      { type: integer }
+        person_name:    { type: string }
+        person_unit:    { type: string, nullable: true }
+        person_avatar:  { type: string, nullable: true }
+
+    PaginatedCourseHit:
+      allOf:
+        - $ref: '#/components/schemas/PaginationMeta'
+        - type: object
+          required: [results]
+          properties:
+            results:
+              type: array
+              items: { $ref: '#/components/schemas/CourseHit' }
 
     PaginatedNewsItem:
       allOf:

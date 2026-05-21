@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Публикации · DSA Faculty{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">📚 Публикации</h1>
+
+<form method="get" action="/publications" class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-6">
+  <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+    <input type="text" name="q" value="{{ q or '' }}" placeholder="Название"
+           class="md:col-span-2 px-3 py-2 rounded border border-slate-300 focus:border-indigo-500 outline-none">
+    <input type="number" name="year_from" value="{{ year_from or '' }}" placeholder="Год от" min="1900" max="2030"
+           class="px-3 py-2 rounded border border-slate-300">
+    <input type="number" name="year_to" value="{{ year_to or '' }}" placeholder="Год до" min="1900" max="2030"
+           class="px-3 py-2 rounded border border-slate-300">
+    <select name="type" class="px-3 py-2 rounded border border-slate-300 bg-white">
+      <option value="">Любой тип</option>
+      {% for t in pub_types %}<option value="{{ t }}" {% if t == type %}selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+    <select name="ordering" class="px-3 py-2 rounded border border-slate-300 bg-white" {% if is_semantic %}disabled{% endif %}>
+      <option value="-created_at" {% if ordering == '-created_at' %}selected{% endif %}>Свежие сначала</option>
+      <option value="created_at" {% if ordering == 'created_at' %}selected{% endif %}>Старые сначала</option>
+      <option value="-year" {% if ordering == '-year' %}selected{% endif %}>Год ↓</option>
+      <option value="year" {% if ordering == 'year' %}selected{% endif %}>Год ↑</option>
+    </select>
+    <label class="flex items-center gap-2 px-3 py-2 rounded border bg-white {% if is_semantic %}border-indigo-400 bg-indigo-50{% else %}border-slate-300{% endif %} cursor-pointer">
+      <input type="checkbox" name="semantic" value="on" {% if is_semantic %}checked{% endif %}
+             class="h-4 w-4 text-indigo-600">
+      <span class="text-sm">🧠 Семантический поиск</span>
+    </label>
+    <div class="flex items-center gap-3">
+      <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Применить</button>
+      <a href="/publications" class="text-sm text-slate-500 hover:underline">сбросить</a>
+      <span class="ml-auto text-sm text-slate-500">{% if is_semantic %}Топ-{{ total }}{% else %}Найдено: <b>{{ total }}</b>{% endif %}</span>
+    </div>
+  </div>
+  {% if is_semantic %}
+    <p class="text-xs text-slate-500 mt-2">
+      🧠 <b>Vector search</b>: ищет публикации по смыслу, не по словам в title. Сортировка по cosine similarity; пагинация и ручная сортировка недоступны.
+    </p>
+  {% endif %}
+  {% if semantic_error %}
+    <p class="text-xs text-amber-700 mt-2">{{ semantic_error }}</p>
+  {% endif %}
+</form>
+
+<div class="space-y-3 mb-6">
+  {% for pub in results %}
+  <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
+    <div class="flex items-baseline gap-2">
+      <h3 class="font-semibold text-slate-900 flex-1">{{ pub.title }}</h3>
+      {% if pub.score is not none %}
+        <span class="text-xs font-mono text-slate-400">{{ '%.3f'|format(pub.score) }}</span>
+      {% endif %}
+    </div>
+    <p class="text-xs text-slate-500 mt-1">
+      {% if pub.year %}<b>{{ pub.year }}</b>{% endif %}
+      {% if pub.type %} · {{ pub.type }}{% endif %}
+      {% if pub.language %} · {{ pub.language }}{% endif %}
+      {% if pub.publisher %} · {{ pub.publisher }}{% endif %}
+    </p>
+    {% if pub.authors %}
+      <p class="text-sm text-slate-600 mt-1 italic">
+        {% for a in pub.authors[:5] %}{% if a.is_hse_person and a.person_id %}<a href="/persons/{{ a.person_id }}" class="hover:underline text-indigo-700">{{ a.display_name }}</a>{% else %}{{ a.display_name }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% if pub.authors|length > 5 %} + ещё {{ pub.authors|length - 5 }}{% endif %}
+      </p>
+    {% endif %}
+    {% if pub.abstract_ru or pub.abstract_en %}
+      <p class="text-sm text-slate-500 mt-2 truncate-2">{{ pub.abstract_ru or pub.abstract_en }}</p>
+    {% endif %}
+    <div class="flex gap-3 mt-2 text-xs">
+      {% if pub.doi_url %}<a href="{{ pub.doi_url }}" target="_blank" class="text-indigo-600 hover:underline">🔗 DOI ↗</a>{% endif %}
+      {% if pub.document_url %}<a href="{{ pub.document_url }}" target="_blank" class="text-indigo-600 hover:underline">📄 PDF ↗</a>{% endif %}
+      {% if pub.external_url %}<a href="{{ pub.external_url }}" target="_blank" class="text-indigo-600 hover:underline">🌐 Внешняя ↗</a>{% endif %}
+    </div>
+  </div>
+  {% else %}
+    <p class="text-center text-slate-500 py-8 italic">Ничего не нашли.</p>
+  {% endfor %}
+</div>
+
+{% if total_pages > 1 %}
+<nav class="flex items-center justify-center gap-1 text-sm">
+  {% if page > 1 %}<a href="{{ pagination_url(page - 1) }}" class="px-3 py-1 rounded border bg-white hover:bg-slate-50">← Назад</a>{% endif %}
+  <span class="px-3 py-1 text-slate-500">Страница {{ page }} / {{ total_pages }}</span>
+  {% if page < total_pages %}<a href="{{ pagination_url(page + 1) }}" class="px-3 py-1 rounded border bg-white hover:bg-slate-50">Вперёд →</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

@@ -35,6 +35,7 @@ services:
       - ./app:/code/app
       - ./alembic:/code/alembic
       - ./alembic.ini:/code/alembic.ini
+      - ./templates:/code/templates
 
 volumes:
   pgdata:

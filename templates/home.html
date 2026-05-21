@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}Подбор научрука · DSA Faculty{% endblock %}
+
+{% block content %}
+<div class="text-center mb-8">
+  <h1 class="text-3xl font-bold text-slate-900 mb-2">🎯 Подбор научрука для курсовой работы</h1>
+  <p class="text-slate-600">Опишите проект — найдём эксперта НИУ ВШЭ, релевантные публикации, преподаваемые курсы.</p>
+</div>
+
+<form method="get" action="/" class="mb-8">
+  <div class="flex gap-2">
+    <input type="text" name="q" value="{{ q or '' }}"
+           placeholder="Опишите свой проект... (например: «применение машинного обучения в медицинской диагностике»)"
+           class="flex-1 px-4 py-3 rounded-lg border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none text-base"
+           autofocus>
+    <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700">
+      🔍 Найти
+    </button>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-5 gap-2 mt-3">
+    <div class="md:col-span-2">
+      <label class="text-xs text-slate-500 block mb-1">Кампус</label>
+      <select name="campus_id" class="w-full px-3 py-2 rounded border border-slate-300 bg-white">
+        <option value="">Все кампусы</option>
+        {% for c in campuses %}<option value="{{ c.campus_id }}" {% if c.campus_id == campus_id %}selected{% endif %}>{{ c.campus_name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="md:col-span-3">
+      <label class="text-xs text-slate-500 block mb-1">Факультет / подразделение</label>
+      <input list="units-list" type="text" name="faculty" value="{{ faculty }}"
+             placeholder="выберите или впишите часть названия (например: «компьютерных», «гуманитарных»)"
+             class="w-full px-3 py-2 rounded border border-slate-300">
+      <datalist id="units-list">
+        {% for u in units %}<option value="{{ u }}">{% endfor %}
+      </datalist>
+    </div>
+  </div>
+</form>
+
+{% if not q %}
+  <div class="bg-blue-50 border border-blue-200 text-blue-800 rounded-lg p-4">
+    💡 Опишите тему проекта или укажите фамилию интересующего преподавателя — и нажмите <b>Найти</b>.
+  </div>
+{% elif q|length < 2 %}
+  <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4">
+    Введите хотя бы 2 символа.
+  </div>
+{% else %}
+
+  {# === Section 1: Experts === #}
+  <section class="mb-10">
+    <h2 class="text-xl font-bold mb-3">🎯 Эксперты по теме</h2>
+    {% if experts_error %}
+      <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4">
+        Не удалось получить данные: {{ experts_error }}
+      </div>
+    {% elif not experts %}
+      <p class="text-slate-500 italic">Никого не нашли.</p>
+    {% else %}
+      <div class="space-y-3">
+        {% for hit in experts %}
+        <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 flex gap-4">
+          {% if hit.avatar %}
+            <img src="{{ hit.avatar }}" class="w-24 h-24 rounded-lg object-cover flex-shrink-0">
+          {% else %}
+            <div class="w-24 h-24 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-3xl">👤</div>
+          {% endif %}
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline gap-2">
+              <a href="/persons/{{ hit.person_id }}" class="text-lg font-semibold text-indigo-700 hover:underline">{{ hit.full_name }}</a>
+              <span class="text-xs text-slate-400">·</span>
+              <a href="{{ hit.profile_url }}" target="_blank" class="text-xs text-slate-500 hover:underline">hse.ru ↗</a>
+            </div>
+            <p class="text-sm text-slate-600">{{ hit.primary_unit or '—' }}{% if hit.campus_name %} · {{ hit.campus_name }}{% endif %}</p>
+
+            <div class="flex items-center gap-2 mt-2">
+              <span class="text-xs text-slate-500">Сходство:</span>
+              <div class="progress flex-1 max-w-xs"><div style="width: {{ (hit.score * 100)|round(1) }}%"></div></div>
+              <span class="text-xs font-mono text-slate-600">{{ '%.3f'|format(hit.score) }}</span>
+            </div>
+
+            {% if hit.matched_topics %}
+              <div class="mt-2">
+                {% for tag in hit.matched_topics[:6] %}<span class="chip">{{ tag }}</span>{% endfor %}
+              </div>
+            {% endif %}
+
+            {% if hit.top_publications %}
+              <ul class="mt-2 text-sm text-slate-700 space-y-0.5">
+                {% for pub in hit.top_publications[:3] %}
+                  <li>· <span class="text-slate-400">{{ pub.year or '—' }}</span> {{ pub.title }}</li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+
+  {# === Section 2: Publications (vector) === #}
+  <section class="mb-10">
+    <h2 class="text-xl font-bold mb-1">📚 Публикации <span class="text-sm font-normal text-slate-500">— семантический поиск по смыслу</span></h2>
+    <p class="text-xs text-slate-400 mb-3">Топ-5 ближайших по cosine. Точный поиск по подстроке: <a href="/publications?q={{ q|urlencode }}" class="underline hover:text-indigo-600">/publications →</a></p>
+    {% if not publications %}
+      <p class="text-slate-500 italic">Ничего не нашли.</p>
+    {% else %}
+      <div class="space-y-3">
+        {% for pub in publications %}
+        <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
+          <div class="flex items-baseline gap-2">
+            <h3 class="font-semibold text-slate-900 flex-1">{{ pub.title }}</h3>
+            {% if pub.score is not none %}
+              <span class="text-xs font-mono text-slate-400">{{ '%.3f'|format(pub.score) }}</span>
+            {% endif %}
+          </div>
+          <p class="text-xs text-slate-500 mt-1">
+            {% if pub.year %}<b>{{ pub.year }}</b>{% endif %}
+            {% if pub.type %} · {{ pub.type }}{% endif %}
+            {% if pub.language %} · {{ pub.language }}{% endif %}
+            {% if pub.publisher %} · {{ pub.publisher }}{% endif %}
+          </p>
+          {% if pub.authors %}
+            <p class="text-sm text-slate-600 mt-1 italic">
+              {% for a in pub.authors[:3] %}{% if a.is_hse_person and a.person_id %}<a href="/persons/{{ a.person_id }}" class="hover:underline text-indigo-700">{{ a.display_name }}</a>{% else %}{{ a.display_name }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% if pub.authors|length > 3 %} + ещё {{ pub.authors|length - 3 }}{% endif %}
+            </p>
+          {% endif %}
+          {% if pub.abstract_ru or pub.abstract_en %}
+            <p class="text-sm text-slate-500 mt-2 truncate-2">{{ pub.abstract_ru or pub.abstract_en }}</p>
+          {% endif %}
+          {% if pub.doi_url %}
+            <a href="{{ pub.doi_url }}" target="_blank" class="text-xs text-indigo-600 hover:underline mt-2 inline-block">🔗 DOI ↗</a>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+
+  {# === Section 3: Courses === #}
+  <section class="mb-10">
+    <h2 class="text-xl font-bold mb-3">🎓 Курсы</h2>
+    {% if not courses %}
+      <p class="text-slate-500 italic">Ничего не нашли.</p>
+    {% else %}
+      <div class="space-y-2">
+        {% for c in courses %}
+        <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-3">
+          <h3 class="font-semibold text-slate-900">{{ c.title }}</h3>
+          <p class="text-xs text-slate-500 mt-1">
+            {% if c.academic_year %}{{ c.academic_year }}{% endif %}
+            {% if c.level %} · {{ c.level }}{% endif %}
+            {% if c.language %} · {{ c.language }}{% endif %}
+          </p>
+          <p class="text-sm mt-1">
+            👤 <a href="/persons/{{ c.person_id }}" class="text-indigo-700 hover:underline">{{ c.person_name }}</a>
+            <span class="text-slate-500">· <em>{{ c.person_unit or '—' }}</em></span>
+          </p>
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+
+  {# === Section 4: Persons === #}
+  <section class="mb-10">
+    <h2 class="text-xl font-bold mb-3">👥 Преподаватели по фамилии</h2>
+    {% if not persons %}
+      <p class="text-slate-500 italic">Никого не нашли.</p>
+    {% else %}
+      <div class="grid md:grid-cols-2 gap-3">
+        {% for p in persons %}
+        <a href="/persons/{{ p.person_id }}" class="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex gap-3 hover:shadow-md hover:border-indigo-300 transition">
+          {% if p.avatar %}
+            <img src="{{ p.avatar }}" class="w-14 h-14 rounded-lg object-cover flex-shrink-0">
+          {% else %}
+            <div class="w-14 h-14 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-xl flex-shrink-0">👤</div>
+          {% endif %}
+          <div class="flex-1 min-w-0">
+            <p class="font-semibold text-slate-900 truncate">{{ p.full_name }}</p>
+            <p class="text-xs text-slate-500 truncate">{{ p.primary_unit or '—' }}</p>
+            <p class="text-xs text-slate-400 mt-1">Публикаций: {{ p.publications_total or 0 }}</p>
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+
+{% endif %}
+{% endblock %}

@@ -15,6 +15,7 @@ from app.models import Authorship, Campus, Course, Person, Publication
 from app.schemas import (
     AuthorRef,
     CampusOut,
+    CourseHit,
     CourseOut,
     HealthResponse,
     NewsItem,
@@ -507,6 +508,60 @@ async def search(
             )
 
     return SearchResponse(query=q, total=total, results=results)
+
+
+# === Курсы (глобальный поиск) ===
+
+@router.get(
+    "/courses",
+    response_model=Paginated[CourseHit],
+    tags=["courses"],
+    summary="Search courses across all instructors",
+    description=(
+        "ILIKE-search by course title across all teachers. Returns each "
+        "course with brief instructor info (name, primary unit, avatar). "
+        "Optional filters by `academic_year` and `language`."
+    ),
+)
+async def search_courses(
+    request: Request,
+    q: str = Query(..., min_length=2, description="Course title substring, e.g. 'машинное обучение'"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    academic_year: str | None = Query(None, description="e.g. '2025/2026'"),
+    language: str | None = Query(None, description="e.g. 'ru' / 'en'"),
+    db: AsyncSession = Depends(get_session),
+):
+    stmt = (
+        select(Course, Person)
+        .join(Person, Person.person_id == Course.person_id)
+        .where(Course.title.ilike(f"%{q}%"))
+    )
+    if academic_year:
+        stmt = stmt.where(Course.academic_year == academic_year)
+    if language:
+        stmt = stmt.where(Course.language == language)
+    stmt = stmt.order_by(Course.academic_year.desc().nullslast(), Course.id.desc())
+
+    rows, total, next_url, prev_url = await paginate(db, stmt, page, page_size, request)
+    results = [
+        CourseHit(
+            course_id=c.id,
+            title=c.title,
+            academic_year=c.academic_year,
+            language=c.language,
+            level=c.level,
+            person_id=p.person_id,
+            person_name=p.full_name,
+            person_unit=p.primary_unit,
+            person_avatar=p.avatar,
+        )
+        for c, p in rows
+    ]
+    return Paginated[CourseHit](
+        count=total, page=page, page_size=page_size,
+        next=next_url, previous=prev_url, results=results,
+    )
 
 
 # === Новости ===

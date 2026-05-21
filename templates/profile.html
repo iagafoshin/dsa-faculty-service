@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}{{ person.full_name }} · DSA Faculty{% endblock %}
+
+{% block content %}
+
+<a href="/persons" class="text-sm text-slate-500 hover:text-indigo-700">← к списку преподавателей</a>
+
+<div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mt-3 mb-6">
+  <div class="flex gap-6">
+    {% if person.avatar %}
+      <img src="{{ person.avatar }}" class="w-32 h-32 rounded-xl object-cover flex-shrink-0">
+    {% else %}
+      <div class="w-32 h-32 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 text-5xl flex-shrink-0">👤</div>
+    {% endif %}
+    <div class="flex-1 min-w-0">
+      <h1 class="text-2xl font-bold text-slate-900">{{ person.full_name }}</h1>
+      <p class="text-slate-600 mt-1">
+        {{ person.primary_unit or '—' }}
+        {% if person.campus_name %} · {{ person.campus_name }}{% endif %}
+      </p>
+      <div class="mt-3 flex gap-4 text-sm">
+        <a href="{{ person.profile_url }}" target="_blank" class="text-indigo-600 hover:underline">🔗 Профиль на hse.ru ↗</a>
+        {% if person.contacts.phones %}<span class="text-slate-600">📞 {{ person.contacts.phones }}</span>{% endif %}
+      </div>
+
+      <div class="grid grid-cols-4 gap-3 mt-4">
+        <div class="bg-slate-50 rounded p-3"><div class="text-xs text-slate-500">Публикаций</div><div class="text-xl font-bold">{{ person.publications_total or 0 }}</div></div>
+        <div class="bg-slate-50 rounded p-3"><div class="text-xs text-slate-500">Языков</div><div class="text-xl font-bold">{{ person.languages|length }}</div></div>
+        <div class="bg-slate-50 rounded p-3"><div class="text-xs text-slate-500">Наград</div><div class="text-xl font-bold">{{ person.awards|length }}</div></div>
+        <div class="bg-slate-50 rounded p-3"><div class="text-xs text-slate-500">Конференций</div><div class="text-xl font-bold">{{ person.conferences|length }}</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# === Tabs via anchor links === #}
+<div class="border-b border-slate-200 mb-4 flex gap-1">
+  <a href="#profile" class="tab-link px-4 py-2 border-b-2 border-indigo-600 text-indigo-700 font-medium">📋 Профиль</a>
+  <a href="#publications" class="tab-link px-4 py-2 border-b-2 border-transparent text-slate-500 hover:text-indigo-700">📚 Публикации ({{ pub_total }})</a>
+  <a href="#courses" class="tab-link px-4 py-2 border-b-2 border-transparent text-slate-500 hover:text-indigo-700">🎓 Курсы ({{ course_total }})</a>
+</div>
+
+{# === Profile tab === #}
+<section id="profile" class="bg-white rounded-lg shadow-sm border border-slate-200 p-6 mb-6">
+
+  {% if person.interests %}
+  <div class="mb-6">
+    <h3 class="font-semibold text-lg mb-2">Профессиональные интересы</h3>
+    <div>{% for i in person.interests %}<span class="chip">{{ i }}</span>{% endfor %}</div>
+  </div>
+  {% endif %}
+
+  {% if person.positions %}
+  <div class="mb-6">
+    <h3 class="font-semibold text-lg mb-2">Должности</h3>
+    <ul class="space-y-1 text-sm">
+      {% for pos in person.positions %}
+        <li>
+          <b>{{ pos.title or '—' }}</b>
+          {% set unit_names = pos.units|map(attribute='name')|reject('none')|list %}
+          {% if unit_names %} — <span class="text-slate-600">{{ unit_names|join(', ') }}</span>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if person.bio_notes %}
+  <div class="mb-6">
+    <h3 class="font-semibold text-lg mb-2">Био</h3>
+    <ul class="space-y-1 text-sm text-slate-700">
+      {% for note in person.bio_notes %}<li>· {{ note }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if person.education.degrees or person.education.extra_education %}
+  <div class="mb-6">
+    <h3 class="font-semibold text-lg mb-2">Образование</h3>
+    <ul class="space-y-1 text-sm text-slate-700">
+      {% for d in person.education.degrees %}<li><span class="text-slate-400">{{ d.year or '—' }}</span> · {{ d.text or '—' }}</li>{% endfor %}
+      {% for e in person.education.extra_education %}<li>· <em>доп.</em> {{ e }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if person.work_experience %}
+  <div class="mb-6">
+    <h3 class="font-semibold text-lg mb-2">Опыт работы</h3>
+    <ul class="space-y-1 text-sm text-slate-700">
+      {% for w in person.work_experience[:30] %}<li>· {{ w }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if person.awards %}
+  <div class="mb-6">
+    <h3 class="font-semibold text-lg mb-2">Награды и поощрения</h3>
+    <ul class="space-y-1 text-sm text-slate-700">
+      {% for a in person.awards[:30] %}<li>· {{ a }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if person.grants %}
+  <div class="mb-6">
+    <h3 class="font-semibold text-lg mb-2">Гранты и проекты</h3>
+    <ul class="space-y-1 text-sm text-slate-700">
+      {% for g in person.grants[:30] %}<li><span class="text-slate-400">{{ g.year or '—' }}</span> · {{ g.title or '—' }}{% if g.role %} ({{ g.role }}){% endif %}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if person.conferences %}
+  <div class="mb-6">
+    <h3 class="font-semibold text-lg mb-2">Конференции ({{ person.conferences|length }})</h3>
+    <details class="text-sm text-slate-700">
+      <summary class="cursor-pointer text-indigo-600">Показать все</summary>
+      <ul class="space-y-1 mt-2">
+        {% for c in person.conferences %}<li>· {{ c }}</li>{% endfor %}
+      </ul>
+    </details>
+  </div>
+  {% endif %}
+
+  {% if person.research_ids %}
+  <div class="mb-6">
+    <h3 class="font-semibold text-lg mb-2">Идентификаторы исследователя</h3>
+    <ul class="space-y-1 text-sm">
+      {% for service, value in person.research_ids.items() %}
+        <li><b>{{ service }}</b>:
+          {% if value.startswith('http') %}<a href="{{ value }}" target="_blank" class="text-indigo-600 hover:underline">{{ value }}</a>
+          {% else %}<code class="bg-slate-100 px-1 rounded">{{ value }}</code>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</section>
+
+{# === Publications tab === #}
+<section id="publications" class="bg-white rounded-lg shadow-sm border border-slate-200 p-6 mb-6">
+  <h2 class="text-xl font-bold mb-4">📚 Публикации <span class="text-sm font-normal text-slate-500">({{ pub_total }})</span></h2>
+  {% if not pubs %}
+    <p class="text-slate-500 italic">Нет публикаций.</p>
+  {% else %}
+    <div class="space-y-3">
+      {% for pub in pubs %}
+      <div class="border-b border-slate-100 pb-3 last:border-b-0">
+        <h4 class="font-medium">{{ pub.title }}</h4>
+        <p class="text-xs text-slate-500 mt-1">
+          {% if pub.year %}<b>{{ pub.year }}</b>{% endif %}
+          {% if pub.type %} · {{ pub.type }}{% endif %}
+          {% if pub.language %} · {{ pub.language }}{% endif %}
+        </p>
+        {% if pub.abstract_ru or pub.abstract_en %}
+          <p class="text-sm text-slate-500 mt-1 truncate-2">{{ pub.abstract_ru or pub.abstract_en }}</p>
+        {% endif %}
+        <div class="flex gap-3 mt-2 text-xs">
+          {% if pub.doi_url %}<a href="{{ pub.doi_url }}" target="_blank" class="text-indigo-600 hover:underline">DOI ↗</a>{% endif %}
+          {% if pub.document_url %}<a href="{{ pub.document_url }}" target="_blank" class="text-indigo-600 hover:underline">PDF ↗</a>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% if pub_pages > 1 %}
+    <nav class="flex items-center justify-center gap-1 text-sm mt-4">
+      {% if pub_page > 1 %}<a href="?pub_page={{ pub_page - 1 }}#publications" class="px-3 py-1 rounded border bg-white hover:bg-slate-50">← Назад</a>{% endif %}
+      <span class="px-3 py-1 text-slate-500">{{ pub_page }} / {{ pub_pages }}</span>
+      {% if pub_page < pub_pages %}<a href="?pub_page={{ pub_page + 1 }}#publications" class="px-3 py-1 rounded border bg-white hover:bg-slate-50">Вперёд →</a>{% endif %}
+    </nav>
+    {% endif %}
+  {% endif %}
+</section>
+
+{# === Courses tab === #}
+<section id="courses" class="bg-white rounded-lg shadow-sm border border-slate-200 p-6 mb-6">
+  <h2 class="text-xl font-bold mb-4">🎓 Курсы <span class="text-sm font-normal text-slate-500">({{ course_total }})</span></h2>
+  {% if not courses %}
+    <p class="text-slate-500 italic">Нет курсов.</p>
+  {% else %}
+    <ul class="space-y-2">
+      {% for c in courses %}
+      <li class="border-b border-slate-100 pb-2 last:border-b-0">
+        <p class="font-medium">{{ c.title }}</p>
+        <p class="text-xs text-slate-500">
+          {% if c.academic_year %}{{ c.academic_year }}{% endif %}
+          {% if c.level %} · {{ c.level }}{% endif %}
+          {% if c.language %} · {{ c.language }}{% endif %}
+        </p>
+      </li>
+      {% endfor %}
+    </ul>
+    {% if course_pages > 1 %}
+    <nav class="flex items-center justify-center gap-1 text-sm mt-4">
+      {% if course_page > 1 %}<a href="?course_page={{ course_page - 1 }}#courses" class="px-3 py-1 rounded border bg-white hover:bg-slate-50">← Назад</a>{% endif %}
+      <span class="px-3 py-1 text-slate-500">{{ course_page }} / {{ course_pages }}</span>
+      {% if course_page < course_pages %}<a href="?course_page={{ course_page + 1 }}#courses" class="px-3 py-1 rounded border bg-white hover:bg-slate-50">Вперёд →</a>{% endif %}
+    </nav>
+    {% endif %}
+  {% endif %}
+</section>
+
+{% endblock %}

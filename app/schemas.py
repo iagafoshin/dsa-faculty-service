@@ -193,6 +193,21 @@ class CourseOut(BaseModel):
     raw_meta: str | None = None
 
 
+class CourseHit(BaseModel):
+    """Один результат поиска по курсам — курс + краткие данные ведущего."""
+    model_config = ConfigDict(from_attributes=True)
+
+    course_id: int
+    title: str
+    academic_year: str | None = None
+    language: str | None = None
+    level: str | None = None
+    person_id: int
+    person_name: str
+    person_unit: str | None = None
+    person_avatar: str | None = None
+
+
 # === Новости ===
 
 class NewsSource(str, Enum):
@@ -248,6 +263,19 @@ class ExpertSearchResponse(BaseModel):
     query: str
     query_tags: list[str] = []
     results: list[ExpertHit]
+
+
+# === Публикации — векторный поиск ===
+
+class PublicationHit(BaseModel):
+    """Одна публикация в результатах семантического поиска."""
+    publication: PublicationOut
+    score: float
+
+
+class PublicationSemanticResponse(BaseModel):
+    query: str
+    results: list[PublicationHit]
 
 
 # === Админ (скрейп-задачи) ===
