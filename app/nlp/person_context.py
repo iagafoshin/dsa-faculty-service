@@ -4,16 +4,8 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from app.models import Course, Person, Publication
-from app.publication_enrichment import clean_html
 
 _MAX_PERSON_CTX = 5000
-
-
-def _extract_abstract(raw: dict[str, Any] | None) -> str | None:
-    if not raw:
-        return None
-    annotation = raw.get("annotation") or {}
-    return clean_html(annotation.get("ru")) or clean_html(annotation.get("en"))
 
 
 def _take_lines(items: Iterable[Any], limit: int | None = None) -> list[str]:
@@ -54,7 +46,7 @@ def build_person_context(
     pub_lines: list[str] = []
     for pub in publications[:30]:
         title = (pub.title or "").strip()
-        abstract = _extract_abstract(pub.raw)
+        abstract = pub.abstract_ru or pub.abstract_en
         if title and abstract:
             pub_lines.append(f"{title}. {abstract}")
         elif title:
@@ -89,14 +81,11 @@ def build_publication_context(pub: Publication) -> str:
     if title:
         parts.append(title)
 
-    abstract = _extract_abstract(pub.raw)
+    abstract = pub.abstract_ru or pub.abstract_en
     if abstract:
         parts.append(abstract)
 
-    raw = pub.raw or {}
-    description = raw.get("description") or {}
-    venue = clean_html(description.get("api"))
-    if venue:
-        parts.append(venue)
+    if pub.venue:
+        parts.append(pub.venue)
 
     return "\n\n".join(parts)

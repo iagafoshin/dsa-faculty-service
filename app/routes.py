@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_session
 from app.models import Authorship, Campus, Course, Person, Publication
-from app.publication_enrichment import enrich_publication
 from app.schemas import (
     AuthorRef,
     CampusOut,
@@ -259,17 +258,7 @@ async def list_person_publications(
     pubs = [r[0] for r in rows]
     authors_map = await _attach_authors(db, pubs)
 
-    results = [
-        enrich_publication(
-            PublicationOut(
-                id=p.id, title=p.title, type=PublicationType(p.type),
-                year=p.year, language=p.language, authors=authors_map.get(p.id, []),
-                url=p.url, created_at=p.created_at,
-            ),
-            p.raw,
-        )
-        for p in pubs
-    ]
+    results = [_publication_to_out(p, authors_map.get(p.id, [])) for p in pubs]
     return Paginated[PublicationOut](
         count=total, page=page, page_size=page_size,
         next=next_url, previous=prev_url, results=results,
@@ -325,11 +314,44 @@ async def _attach_authors(db: AsyncSession, pubs: list[Publication]) -> dict[str
     for a in rows:
         out.setdefault(a.publication_id, []).append(
             AuthorRef(
-                person_id=a.person_id, display_name=a.display_name,
-                href=a.href, position=a.position,
+                person_id=a.person_id,
+                display_name=a.display_name,
+                display_name_en=a.display_name_en,
+                href=a.href,
+                is_hse_person=a.is_hse_person,
+                position=a.position,
             )
         )
     return out
+
+
+def _publication_to_out(p: Publication, authors: list[AuthorRef]) -> PublicationOut:
+    """Собирает ответ PublicationOut из колонок ORM-модели.
+
+    Доп. поля (abstract, doi, editors, ...) парсятся при scrape в
+    `app/scraper/ingest.py:_publication_payload` — здесь просто читаем.
+    """
+    return PublicationOut(
+        id=p.id,
+        title=p.title,
+        type=PublicationType(p.type),
+        year=p.year,
+        language=p.language,
+        url=p.url,
+        authors=authors,
+        created_at=p.created_at,
+        abstract_ru=p.abstract_ru,
+        abstract_en=p.abstract_en,
+        venue=p.venue,
+        citation=p.citation,
+        publisher=p.publisher,
+        doi_url=p.doi_url,
+        document_url=p.document_url,
+        external_url=p.external_url,
+        cover_url=p.cover_url,
+        editors=p.editors,
+        translators=p.translators,
+    )
 
 
 @router.get("/publications", response_model=Paginated[PublicationOut], tags=["publications"])
@@ -377,17 +399,7 @@ async def list_publications(
     pubs = [r[0] for r in rows]
     authors_map = await _attach_authors(db, pubs)
 
-    results = [
-        enrich_publication(
-            PublicationOut(
-                id=p.id, title=p.title, type=PublicationType(p.type),
-                year=p.year, language=p.language,
-                authors=authors_map.get(p.id, []), url=p.url, created_at=p.created_at,
-            ),
-            p.raw,
-        )
-        for p in pubs
-    ]
+    results = [_publication_to_out(p, authors_map.get(p.id, [])) for p in pubs]
     return Paginated[PublicationOut](
         count=total, page=page, page_size=page_size,
         next=next_url, previous=prev_url, results=results,
@@ -403,12 +415,7 @@ async def get_publication(pub_id: str, db: AsyncSession = Depends(get_session)) 
             detail={"code": "not_found", "message": f"Publication {pub_id} not found"},
         )
     authors_map = await _attach_authors(db, [pub])
-    base = PublicationOut(
-        id=pub.id, title=pub.title, type=PublicationType(pub.type),
-        year=pub.year, language=pub.language,
-        authors=authors_map.get(pub.id, []), url=pub.url, created_at=pub.created_at,
-    )
-    return enrich_publication(base, pub.raw)
+    return _publication_to_out(pub, authors_map.get(pub.id, []))
 
 
 # === Поиск ===

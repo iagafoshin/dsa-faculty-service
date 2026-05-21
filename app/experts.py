@@ -93,6 +93,17 @@ async def search_experts(
                 url=p.url,
                 created_at=p.created_at,
                 authors=[],
+                abstract_ru=p.abstract_ru,
+                abstract_en=p.abstract_en,
+                venue=p.venue,
+                citation=p.citation,
+                publisher=p.publisher,
+                doi_url=p.doi_url,
+                document_url=p.document_url,
+                external_url=p.external_url,
+                cover_url=p.cover_url,
+                editors=p.editors,
+                translators=p.translators,
             )
             for p in top_pubs_by_person.get(person.person_id, [])
         ]

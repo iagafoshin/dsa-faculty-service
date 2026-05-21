@@ -108,6 +108,25 @@ class Publication(Base):
     url: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     raw: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+
+    # Поля, ранее извлекавшиеся из raw на каждый GET (см. историю
+    # app/publication_enrichment.py). Теперь парсятся один раз при upsert.
+    abstract_ru: Mapped[str | None] = mapped_column(String, nullable=True)
+    abstract_en: Mapped[str | None] = mapped_column(String, nullable=True)
+    venue: Mapped[str | None] = mapped_column(String, nullable=True)
+    citation: Mapped[str | None] = mapped_column(String, nullable=True)
+    publisher: Mapped[str | None] = mapped_column(String, nullable=True)
+    doi_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    document_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    external_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    cover_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    editors: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"),
+    )
+    translators: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"),
+    )
+
     topics: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"),
     )
@@ -149,7 +168,11 @@ class Authorship(Base):
         nullable=True,
     )
     display_name: Mapped[str] = mapped_column(String, nullable=False)
+    display_name_en: Mapped[str | None] = mapped_column(String, nullable=True)
     href: Mapped[str | None] = mapped_column(String, nullable=True)
+    is_hse_person: Mapped[bool] = mapped_column(
+        nullable=False, server_default=text("false"),
+    )
 
     publication = relationship("Publication", back_populates="authorships")
     person = relationship("Person", lazy="joined")
