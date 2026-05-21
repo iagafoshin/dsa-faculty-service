@@ -136,6 +136,10 @@ async def home(
                 for person, c_name, score in exp_rows
             ]
         except Exception as e:
+            # Postgres помечает транзакцию как aborted при любой SQL-ошибке;
+            # без rollback все последующие запросы в этой же сессии упадут
+            # с InFailedSQLTransactionError.
+            await db.rollback()
             ctx["experts_error"] = str(e)
 
         # === Publications (vector — для подбора курсача важен смысл, не подстрока) ===
@@ -153,6 +157,7 @@ async def home(
             ctx["publications_total"] = len(pub_rows)
         except Exception as e:
             # Fallback на ILIKE если NLP-стек недоступен (прод-Docker без torch)
+            await db.rollback()
             ctx["publications_error"] = str(e)
             pubs = list((await db.execute(
                 select(Publication).where(Publication.title.ilike(like))
