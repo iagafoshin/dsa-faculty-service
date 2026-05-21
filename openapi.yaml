@@ -268,19 +268,46 @@ paths:
       description: |
         Embeds the free-text query with a multilingual sentence-transformer and ranks
         persons by cosine similarity over `persons.embedding` (HNSW index).
-        `matched_topics` is the intersection of query keyphrases (from KeyBERT)
-        and the person's `interests_extracted`.
+        `matched_topics` is a substring match of the query tokens against the
+        person's `interests_extracted` (works on short queries where KeyBERT
+        would return no keyphrases).
       operationId: searchExperts
       parameters:
         - { name: q, in: query, required: true, schema: { type: string, minLength: 2 }, example: "блокчейн" }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 10 } }
-        - { name: campus_id, in: query, schema: { type: string }, description: "Restrict to one campus." }
+        - { name: campus_id,        in: query, schema: { type: string }, description: "Restrict to one campus." }
+        - { name: primary_unit,     in: query, schema: { type: string }, description: "Substring filter on primary unit (faculty)." }
+        - { name: has_publications, in: query, schema: { type: boolean }, description: "Only persons with (or without) publications." }
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ExpertSearchResponse' }
+
+  /publications/semantic-search:
+    get:
+      tags: [publications]
+      summary: Semantic search over publications (vector)
+      description: |
+        Embeds the query, ranks publications by cosine similarity over
+        `publications.embedding` (HNSW). Filters (year range, type, language)
+        are applied alongside the vector ordering — useful for thesis
+        literature review ("find me 2023+ articles on this topic").
+      operationId: semanticSearchPublications
+      parameters:
+        - { name: q,         in: query, required: true, schema: { type: string, minLength: 2 } }
+        - { name: limit,     in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+        - { name: year_from, in: query, schema: { type: integer, minimum: 1900, maximum: 2100 } }
+        - { name: year_to,   in: query, schema: { type: integer, minimum: 1900, maximum: 2100 } }
+        - { name: type,      in: query, schema: { $ref: '#/components/schemas/PublicationType' } }
+        - { name: language,  in: query, schema: { type: string }, example: "рус" }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicationSemanticResponse' }
 
   /admin/scrape:
     post:
@@ -427,6 +454,20 @@ components:
         query:      { type: string }
         query_tags: { type: array, items: { type: string }, description: "Keyphrases extracted from the query" }
         results:    { type: array, items: { $ref: '#/components/schemas/ExpertHit' } }
+
+    PublicationHit:
+      type: object
+      required: [publication, score]
+      properties:
+        publication: { $ref: '#/components/schemas/Publication' }
+        score:       { type: number, format: float, description: "Cosine similarity between query and publication embeddings (0..1)" }
+
+    PublicationSemanticResponse:
+      type: object
+      required: [query, results]
+      properties:
+        query:   { type: string }
+        results: { type: array, items: { $ref: '#/components/schemas/PublicationHit' } }
 
     ReadyResponse:
       type: object

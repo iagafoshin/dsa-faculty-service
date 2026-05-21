@@ -2,14 +2,23 @@
 
 Микросервис данных о научно-педагогических работниках (НПР) для платформы
 **Digital Student Assistant (DSA)**. Собирает профили преподавателей с
-hse.ru и `publications.hse.ru`, хранит в Postgres, отдаёт через REST API.
-Поверх классического поиска есть **векторный поиск экспертов по теме**
-(`/experts/search`) — embeddings профилей по spaCy + KeyBERT-тегам и
-multilingual sentence-transformer.
+hse.ru и `publications.hse.ru`, хранит в Postgres, отдаёт через REST API
+и server-rendered HTML.
+
+Над классическим поиском надстроены **два векторных слоя**:
+- `/api/v1/experts/search` — поиск экспертов по теме над embeddings персон
+- `/api/v1/publications/semantic-search` — семантический поиск над embeddings
+  публикаций (для подбора лит-обзора курсача / диплома)
+
+Embeddings — `paraphrase-multilingual-MiniLM-L12-v2`, 384-мерные, HNSW-индекс
+поверх pgvector.
+
+Поверх API — **HTML-UI на Jinja2 + Tailwind** (`/`, `/persons`, `/publications`,
+`/persons/{id}`).
 
 - **Источник истины контракта:** `openapi.yaml`
 - **Прод:** https://faculty.agafoshin.ru/docs
-- **Локально после `make up`:** http://localhost:8000/docs
+- **Локально после `make up`:** http://localhost:8000/ (UI), `/docs` (Swagger)
 
 ---
 
@@ -127,10 +136,15 @@ optional-extras `[nlp]`. Прод-образ их **не ставит** — enri
 │   ├── main.py                    # FastAPI-приложение, mounts роутеров
 │   ├── config.py                  # pydantic-settings (env-based)
 │   ├── database.py                # async engine + sessionmaker + get_session()
-│   ├── routes.py                  # ВЕСЬ публичный API (health, meta, persons,
+│   ├── routes.py                  # JSON API (health, meta, persons,
 │   │                              #   publications, courses, search, news)
 │   ├── admin.py                   # /admin/scrape{,/cancel,/{job_id}}
-│   ├── experts.py                 # /experts/search (lazy-import NLP)
+│   ├── experts.py                 # /experts/search + /publications/semantic-search
+│   │                              #   (JSON, lazy-import NLP)
+│   ├── ui.py                      # HTML-страницы (/, /persons, /publications,
+│   │                              #   /persons/{id}); Jinja2 + Tailwind
+│   ├── vector_search.py           # общие helper'ы vector_search_{persons,publications}
+│   │                              #   и compute_matched_topics для experts.py + ui.py
 │   ├── models.py                  # ВСЕ SQLAlchemy-таблицы в одном файле
 │   ├── schemas.py                 # ВСЕ Pydantic-схемы ответов
 │   ├── nlp/
@@ -151,6 +165,12 @@ optional-extras `[nlp]`. Прод-образ их **не ставит** — enri
 │       └── ingest.py              # upsert_person: один батч → транзакция;
 │                                  #   парсинг extras при insert (abstract,
 │                                  #   DOI, editors, ...)
+├── templates/                     # Jinja2 для app/ui.py
+│   ├── base.html                  # layout: navbar + Tailwind CDN
+│   ├── home.html                  # 🎯 Подбор научрука (поиск + 4 секции)
+│   ├── persons.html               # 👥 список преподавателей
+│   ├── publications.html          # 📚 список + checkbox семантического поиска
+│   └── profile.html               # 👤 профиль с табами (профиль/публикации/курсы)
 ├── scripts/
 │   ├── test_extractor.py          # smoke: 5 захардкоженных person_id, видим теги
 │   ├── test_embedder.py           # smoke: cosine ru↔en blockchain ≈ 0.88
@@ -317,9 +337,11 @@ Swagger UI на `/docs`.
 | `GET /persons/{id}/courses` | курсы |
 | `GET /publications` | список с фильтрами `q`, `year_from/to`, `type`, `author_person_id` |
 | `GET /publications/{id}` | одна публикация с авторами/редакторами |
+| `GET /publications/semantic-search?q=...` | **vector-поиск** публикаций (см. ниже) — фильтры `year_from/to`, `type`, `language` |
+| `GET /courses?q=...` | поиск курсов по названию, фильтры `academic_year`, `language` |
 | `GET /search?q=...` | гибридный triagram + ILIKE поиск по persons и publications |
 | `GET /news` | лента — последние публикации как «новости» |
-| `GET /experts/search?q=...` | **векторный поиск экспертов** по теме (см. ниже) |
+| `GET /experts/search?q=...` | **vector-поиск** экспертов по теме — фильтры `campus_id`, `primary_unit`, `has_publications` (см. ниже) |
 | `POST /admin/scrape` 🔒 | запуск фонового скрейпа, фильтры `campus_ids`, `letters`, `limit` |
 | `GET /admin/scrape/{job_id}` 🔒 | статус задачи |
 | `POST /admin/scrape/{job_id}/cancel` 🔒 | мягкая отмена |
@@ -330,6 +352,20 @@ Swagger UI на `/docs`.
 Пагинация повсюду — `?page=N&page_size=M` со схемой `Paginated[T]`,
 которая отдаёт `{count, page, page_size, next, previous, results}`.
 Helper `paginate()` инлайн в `routes.py`.
+
+### HTML UI (root-paths)
+
+Поверх JSON API — server-rendered HTML на Jinja2 + Tailwind через CDN.
+
+| Метод + путь | Назначение |
+|---|---|
+| `GET /` | 🎯 Подбор научрука. Поисковая строка + 2 фильтра (кампус + факультет с datalist-автокомплитом). Результат: 4 секции — эксперты (vector, top-20), публикации (vector, top-5), курсы (ILIKE, top-5), преподаватели по фамилии (ILIKE, top-5) |
+| `GET /persons` | Список преподавателей с пагинацией + фильтры (q, кампус, has_publications) + сортировка |
+| `GET /persons/{id}` | Профиль: метрики, секции (интересы, должности, био, награды, гранты, конференции, патенты, research_ids), пагинированные публикации, курсы |
+| `GET /publications` | Список публикаций с пагинацией + фильтры (q, год, тип) + сортировка. Checkbox **🧠 «Семантический поиск»** переключает на vector mode |
+
+Шаблоны живут в `templates/`, роуты — в `app/ui.py`. Никаких CSS-билдов:
+Tailwind через CDN.
 
 ---
 
@@ -467,7 +503,17 @@ python -m app.nlp enrich-publications [--batch=200] [--only-empty] [--sample=N]
 
 ---
 
-## Векторный поиск экспертов
+## Векторный поиск
+
+Общие helper'ы — в `app/vector_search.py`:
+- `vector_search_persons(db, q, *, campus_id, primary_unit, has_publications, limit)`
+- `vector_search_publications(db, q, *, year_from, year_to, pub_type, language, limit)`
+- `compute_matched_topics(query, person_topics)` — substring-сопоставление
+
+Их зовут и JSON-эндпоинты (`app/experts.py`), и HTML-страницы (`app/ui.py`) —
+без дублирования SQL.
+
+### Эксперты по теме
 
 `GET /api/v1/experts/search?q=...&limit=10&campus_id=...`
 
@@ -487,8 +533,38 @@ python -m app.nlp enrich-publications [--batch=200] [--only-empty] [--sample=N]
 
 3. Для top-10 одной батч-выборкой подгружаются 3 свежих публикации
    каждого (через `ORDER BY year DESC` per person).
-4. `extract_topics(q)` на запросе даёт `query_tags`; пересечение с
-   `person.interests_extracted` идёт в `matched_topics` ответа.
+4. `extract_topics(q)` на запросе даёт `query_tags`; для `matched_topics`
+   используется **substring-сопоставление** токенов запроса с
+   `person.interests_extracted` (надёжно на запросах любой длины,
+   в отличие от пересечения с KeyBERT-keyphrases).
+
+### Публикации по теме (для лит-обзора курсача)
+
+`GET /api/v1/publications/semantic-search?q=...&year_from=...&type=...`
+
+SQL — тот же паттерн, но по `publications.embedding`:
+
+```sql
+SELECT p.*, 1 - (p.embedding <=> :q_vec) AS score
+FROM publications p
+WHERE p.embedding IS NOT NULL
+  [ AND p.year >= :year_from ]
+  [ AND p.year <= :year_to ]
+  [ AND p.type = :type ]
+  [ AND p.language = :language ]
+ORDER BY p.embedding <=> :q_vec
+LIMIT :limit;
+```
+
+Use case: студент пишет введение курсовой и ищет релевантные работы для
+лит-обзора. ILIKE по «машинное обучение» даёт 635 публикаций с этими
+словами в title, vector search — статьи по смыслу, даже если конкретных
+слов нет (например, «AutoML в медицинской диагностике» для запроса
+«применение машинного обучения в медицине»).
+
+В UI семантический режим включается checkbox'ом «🧠 Семантический поиск»
+на `/publications`; на главной странице `/` секция публикаций
+**всегда** использует vector (там это основной use case).
 
 ### Прод-нюанс
 

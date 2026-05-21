@@ -21,6 +21,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models import Authorship, Campus, Course, Person, Publication
+from app.routes import _attach_authors  # shared dict[str, list[AuthorRef]] builder
+from app.schemas import AuthorRef
+from app.vector_search import (
+    compute_matched_topics,
+    vector_search_persons,
+    vector_search_publications,
+)
 
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -52,7 +59,7 @@ async def _list_units(db: AsyncSession) -> list[str]:
     return [u for u, _ in rows]
 
 
-def _pub_to_dict(p: Publication) -> dict[str, Any]:
+def _pub_to_dict(p: Publication, authors: list[AuthorRef] | None = None) -> dict[str, Any]:
     return {
         "id": p.id,
         "title": p.title,
@@ -65,28 +72,8 @@ def _pub_to_dict(p: Publication) -> dict[str, Any]:
         "doi_url": p.doi_url,
         "document_url": p.document_url,
         "external_url": p.external_url,
-        "authors": [],  # заполняется отдельно
+        "authors": authors or [],
     }
-
-
-async def _attach_authors(db: AsyncSession, pubs: list[Publication]) -> None:
-    if not pubs:
-        return
-    pub_ids = [p.id for p in pubs]
-    rows = (await db.execute(
-        select(Authorship)
-        .where(Authorship.publication_id.in_(pub_ids))
-        .order_by(Authorship.publication_id, Authorship.position)
-    )).scalars().all()
-    by_pub: dict[str, list[dict[str, Any]]] = {}
-    for a in rows:
-        by_pub.setdefault(a.publication_id, []).append({
-            "person_id": a.person_id,
-            "display_name": a.display_name,
-            "is_hse_person": a.is_hse_person,
-        })
-    for p in pubs:  # type: ignore[assignment]
-        p._authors_for_template = by_pub.get(p.id, [])  # type: ignore[attr-defined]
 
 
 # === GET / (home — search) ===
@@ -119,48 +106,13 @@ async def home(
     if q and len(q) >= 2:
         like = f"%{q}%"
 
-        # Experts (vector) + faculty/campus filters
+        # === Experts (vector) ===
         try:
-            from app.nlp.embedder import embed
-            q_vec = embed(q)
-
-            exp_stmt = (
-                select(
-                    Person,
-                    Campus.campus_name,
-                    (1 - Person.embedding.cosine_distance(q_vec)).label("score"),
-                )
-                .outerjoin(Campus, Person.campus_id == Campus.campus_id)
-                .where(Person.embedding.is_not(None))
+            exp_rows, top_pubs = await vector_search_persons(
+                db, q, limit=20, campus_id=campus_id, primary_unit=faculty or None,
             )
-            if campus_id:
-                exp_stmt = exp_stmt.where(Person.campus_id == campus_id)
-            if faculty:
-                exp_stmt = exp_stmt.where(Person.primary_unit.ilike(f"%{faculty}%"))
-            exp_stmt = exp_stmt.order_by(Person.embedding.cosine_distance(q_vec)).limit(20)
-            exp_rows = (await db.execute(exp_stmt)).all()
-
-            # top-3 публикаций каждого
-            exp_ids = [r[0].person_id for r in exp_rows]
-            top_pubs: dict[int, list[Publication]] = {pid: [] for pid in exp_ids}
-            if exp_ids:
-                pub_rows = (await db.execute(
-                    select(Authorship.person_id, Publication)
-                    .join(Publication, Authorship.publication_id == Publication.id)
-                    .where(Authorship.person_id.in_(exp_ids))
-                    .order_by(Authorship.person_id, Publication.year.desc().nullslast(), Publication.id)
-                )).all()
-                for pid, pub in pub_rows:
-                    if len(top_pubs[pid]) < 3:
-                        top_pubs[pid].append(pub)
-
-            q_tokens = [t.lower() for t in q.split() if len(t) > 2]
-            for person, c_name, score in exp_rows:
-                matched: list[str] = []
-                for topic in (person.interests_extracted or []):
-                    if any(tok in topic.lower() for tok in q_tokens):
-                        matched.append(topic)
-                ctx["experts"].append({
+            ctx["experts"] = [
+                {
                     "person_id": person.person_id,
                     "full_name": person.full_name,
                     "profile_url": person.profile_url,
@@ -168,54 +120,41 @@ async def home(
                     "primary_unit": person.primary_unit,
                     "campus_name": c_name,
                     "score": float(score),
-                    "matched_topics": matched,
+                    "matched_topics": compute_matched_topics(q, person.interests_extracted),
                     "top_publications": [
                         {"year": p.year, "title": p.title}
                         for p in top_pubs.get(person.person_id, [])
                     ],
-                })
+                }
+                for person, c_name, score in exp_rows
+            ]
         except Exception as e:
             ctx["experts_error"] = str(e)
 
-        # Publications — семантический поиск (vector) + фильтры год/тип.
-        # На главной важно «по смыслу» — для курсовой важно найти статью по
-        # теме, даже если конкретные слова не в title. Точный ILIKE-поиск
-        # доступен на /publications.
+        # === Publications (vector — для подбора курсача важен смысл, не подстрока) ===
         try:
-            from app.nlp.embedder import embed as _embed_pub
-            q_vec_pub = _embed_pub(q)
-            sem_pub_q = (
-                select(
-                    Publication,
-                    (1 - Publication.embedding.cosine_distance(q_vec_pub)).label("score"),
-                )
-                .where(Publication.embedding.is_not(None))
-            )
-            sem_pub_q = sem_pub_q.order_by(
-                Publication.embedding.cosine_distance(q_vec_pub)
-            ).limit(5)
-            rows_pub = (await db.execute(sem_pub_q)).all()
-            pubs = [r[0] for r in rows_pub]
-            await _attach_authors(db, pubs)
+            pub_rows = await vector_search_publications(db, q, limit=5)
+            pubs = [p for p, _ in pub_rows]
+            authors_by_pub = await _attach_authors(db, pubs)
             ctx["publications"] = [
                 {
-                    **_pub_to_dict(p),
-                    "authors": p._authors_for_template,  # type: ignore[attr-defined]
-                    "score": float(score),
+                    **_pub_to_dict(p, authors_by_pub.get(p.id, [])),
+                    "score": score,
                 }
-                for p, score in rows_pub
+                for p, score in pub_rows
             ]
-            ctx["publications_total"] = len(rows_pub)  # vector — топ-K, total не имеет смысла
+            ctx["publications_total"] = len(pub_rows)
         except Exception as e:
             # Fallback на ILIKE если NLP-стек недоступен (прод-Docker без torch)
             ctx["publications_error"] = str(e)
-            pub_q = select(Publication).where(Publication.title.ilike(like)).order_by(
-                Publication.year.desc().nullslast(), Publication.id.asc()
-            ).limit(5)
-            pubs = list((await db.execute(pub_q)).scalars().all())
-            await _attach_authors(db, pubs)
+            pubs = list((await db.execute(
+                select(Publication).where(Publication.title.ilike(like))
+                .order_by(Publication.year.desc().nullslast(), Publication.id.asc())
+                .limit(5)
+            )).scalars().all())
+            authors_by_pub = await _attach_authors(db, pubs)
             ctx["publications"] = [
-                {**_pub_to_dict(p), "authors": p._authors_for_template, "score": None}  # type: ignore[attr-defined]
+                {**_pub_to_dict(p, authors_by_pub.get(p.id, [])), "score": None}
                 for p in pubs
             ]
 
@@ -373,25 +312,17 @@ async def publications_list(
     if is_semantic:
         # Vector mode: top-K по cosine, без пагинации; фильтры применяются.
         try:
-            from app.nlp.embedder import embed as _embed
-            q_vec = _embed(q)
-            sem_q = select(
-                Publication,
-                (1 - Publication.embedding.cosine_distance(q_vec)).label("score"),
-            ).where(Publication.embedding.is_not(None))
-            if year_from_i is not None:
-                sem_q = sem_q.where(Publication.year >= year_from_i)
-            if year_to_i is not None:
-                sem_q = sem_q.where(Publication.year <= year_to_i)
-            if type:
-                sem_q = sem_q.where(Publication.type == type)
-            sem_q = sem_q.order_by(Publication.embedding.cosine_distance(q_vec)).limit(page_size)
-            rows = (await db.execute(sem_q)).all()
-            pubs = [r[0] for r in rows]
-            await _attach_authors(db, pubs)
+            rows = await vector_search_publications(
+                db, q,
+                limit=page_size,
+                year_from=year_from_i, year_to=year_to_i,
+                pub_type=type,
+            )
+            pubs = [p for p, _ in rows]
+            authors_by_pub = await _attach_authors(db, pubs)
             results = [
-                {**_pub_to_dict(p), "authors": p._authors_for_template, "score": float(s)}  # type: ignore[attr-defined]
-                for p, s in rows
+                {**_pub_to_dict(p, authors_by_pub.get(p.id, [])), "score": score}
+                for p, score in rows
             ]
             total = len(results)
         except Exception as e:
@@ -420,9 +351,9 @@ async def publications_list(
         order_expr = _ORDER.get(ordering, Publication.created_at.desc())
         base = base.order_by(order_expr, Publication.id.asc()).limit(page_size).offset((page - 1) * page_size)
         pubs = list((await db.execute(base)).scalars().all())
-        await _attach_authors(db, pubs)
+        authors_by_pub = await _attach_authors(db, pubs)
         results = [
-            {**_pub_to_dict(p), "authors": p._authors_for_template, "score": None}  # type: ignore[attr-defined]
+            {**_pub_to_dict(p, authors_by_pub.get(p.id, [])), "score": None}
             for p in pubs
         ]
 
