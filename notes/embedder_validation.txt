@@ -1,0 +1,11 @@
+NLP device: mps
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 13363.86it/s]
+
+                                             A        B        C
+A  блокчейн и распределённые системы      1.000     0.884     0.190
+B  blockchain and distributed systems     0.884     1.000     0.179
+C  теория категорий в алгебре             0.190     0.179     1.000
+
+A↔B (ru/en blockchain):     0.884  ожидается > 0.7
+A↔C (blockchain vs алгебра): 0.190  ожидается заметно ниже
+B↔C (blockchain vs алгебра): 0.179  ожидается заметно ниже
