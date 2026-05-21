@@ -19,10 +19,17 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_session
-from app.models import Authorship, Campus, Course, Person, Publication
+from datetime import datetime, timezone
+import uuid
+
+from fastapi import BackgroundTasks, Form
+from fastapi.responses import RedirectResponse
+
+from app.database import AsyncSessionLocal, get_session
+from app.models import Authorship, Campus, Course, Person, Publication, ScrapeJob
 from app.routes import _attach_authors  # shared dict[str, list[AuthorRef]] builder
-from app.schemas import AuthorRef
+from app.schemas import AuthorRef, ScrapeStatus
+from app.scraper.crawler import crawl_and_ingest
 from app.vector_search import (
     compute_matched_topics,
     vector_search_persons,
@@ -456,3 +463,92 @@ async def person_profile(
         "pubs": pubs_data, "pub_total": pub_total, "pub_page": pub_page, "pub_pages": pub_pages,
         "courses": courses, "course_total": course_total, "course_page": course_page, "course_pages": course_pages,
     })
+
+
+# === Админ-вкладка скрейпера ===
+#
+# UI-роуты НЕ проверяют X-Admin-Token (мы не можем установить заголовок
+# из HTML-формы). Для прод-деплоя закрывайте /admin через reverse-proxy
+# (basic-auth, IP-allowlist и т.п.) либо просто не открывайте порт UI наружу.
+
+ADMIN_LETTERS = list("АБВГДЕЖЗИКЛМНОПРСТУФХЦЧШЩЭЮЯ")
+ADMIN_RUNNING_STATUSES = {
+    ScrapeStatus.queued.value,
+    ScrapeStatus.running.value,
+    ScrapeStatus.cancelling.value,
+}
+
+
+@router.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_session)):
+    # Список последних 20 джобов
+    rows = (await db.execute(
+        select(ScrapeJob).order_by(ScrapeJob.started_at.desc()).limit(20)
+    )).scalars().all()
+    return templates.TemplateResponse(request, "admin.html", {
+        "campuses": await _list_campuses(db),
+        "letters": ADMIN_LETTERS,
+        "jobs": rows,
+        "running_statuses": ADMIN_RUNNING_STATUSES,
+    })
+
+
+@router.post("/admin/scrape", response_class=HTMLResponse)
+async def admin_scrape_start(
+    background: BackgroundTasks,
+    campus_ids: list[str] | None = Form(default=None),
+    letters: str = Form(default=""),
+    limit: str = Form(default=""),
+    db: AsyncSession = Depends(get_session),
+):
+    # Параметры из формы — нормализуем
+    campus_ids_clean = [c for c in (campus_ids or []) if c.strip()] or None
+    letters_clean = [c.strip() for c in letters.split(",") if c.strip()] or None
+    try:
+        limit_i: int | None = int(limit) if limit.strip() else None
+    except ValueError:
+        limit_i = None
+
+    job_id = str(uuid.uuid4())
+    job = ScrapeJob(
+        job_id=job_id,
+        status=ScrapeStatus.queued.value,
+        limit_count=limit_i,
+        campus_id=",".join(campus_ids_clean) if campus_ids_clean else None,
+        processed=0,
+        total=None,
+        started_at=datetime.now(timezone.utc),
+    )
+    db.add(job)
+    await db.commit()
+
+    background.add_task(
+        crawl_and_ingest,
+        limit_i, campus_ids_clean, letters_clean, job_id, AsyncSessionLocal,
+    )
+    # 303 See Other — после POST уводит на GET страницы джоба
+    return RedirectResponse(f"/admin/scrape/{job_id}", status_code=303)
+
+
+@router.get("/admin/scrape/{job_id}", response_class=HTMLResponse)
+async def admin_job_view(
+    request: Request, job_id: str, db: AsyncSession = Depends(get_session),
+):
+    job = await db.get(ScrapeJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return templates.TemplateResponse(request, "admin_job.html", {
+        "job": job,
+        "is_running": job.status in ADMIN_RUNNING_STATUSES,
+    })
+
+
+@router.post("/admin/scrape/{job_id}/cancel", response_class=HTMLResponse)
+async def admin_job_cancel(job_id: str, db: AsyncSession = Depends(get_session)):
+    job = await db.get(ScrapeJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status in (ScrapeStatus.queued.value, ScrapeStatus.running.value):
+        job.status = ScrapeStatus.cancelling.value
+        await db.commit()
+    return RedirectResponse(f"/admin/scrape/{job_id}", status_code=303)

@@ -26,6 +26,7 @@ dependencies = [
     "orjson>=3.10",
     "pgvector>=0.3",
     "jinja2>=3.1",
+    "python-multipart>=0.0.20",   # парсинг form-data в /admin/scrape UI-роуте
 ]
 
 # Тяжёлые NLP-зависимости. Нужны только для локального enrich-CLI

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Скрейп-джоб {{ job.job_id[:8] }} · DSA Faculty{% endblock %}
+
+{% block content %}
+{# Авто-рефреш только пока джоб идёт. После завершения страница статичная. #}
+{% if is_running %}
+  <meta http-equiv="refresh" content="3">
+{% endif %}
+
+<a href="/admin" class="text-sm text-slate-500 hover:text-indigo-700">← к списку джобов</a>
+
+<div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mt-3">
+  <div class="flex items-center justify-between gap-3">
+    <h1 class="text-xl font-bold">Скрейп-джоб</h1>
+    {% if job.status == 'done' %}<span class="px-2 py-1 rounded text-sm bg-emerald-100 text-emerald-700">✓ done</span>
+    {% elif job.status == 'failed' %}<span class="px-2 py-1 rounded text-sm bg-rose-100 text-rose-700">✗ failed</span>
+    {% elif job.status == 'cancelled' %}<span class="px-2 py-1 rounded text-sm bg-slate-100 text-slate-600">⊘ cancelled</span>
+    {% elif job.status == 'running' %}<span class="px-2 py-1 rounded text-sm bg-indigo-100 text-indigo-700">⟳ running</span>
+    {% elif job.status == 'queued' %}<span class="px-2 py-1 rounded text-sm bg-amber-100 text-amber-700">… queued</span>
+    {% elif job.status == 'cancelling' %}<span class="px-2 py-1 rounded text-sm bg-amber-100 text-amber-700">⌛ cancelling</span>
+    {% endif %}
+  </div>
+
+  <p class="text-xs font-mono text-slate-500 mt-1">{{ job.job_id }}</p>
+
+  {% if is_running %}
+    <p class="text-xs text-slate-400 mt-2">⟳ Страница обновится сама через 3 секунды.</p>
+  {% endif %}
+
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6">
+    <div class="bg-slate-50 rounded p-3">
+      <div class="text-xs text-slate-500">Обработано</div>
+      <div class="text-2xl font-bold">{{ job.processed }}</div>
+    </div>
+    <div class="bg-slate-50 rounded p-3">
+      <div class="text-xs text-slate-500">Всего</div>
+      <div class="text-2xl font-bold">{{ job.total or '—' }}</div>
+    </div>
+    <div class="bg-slate-50 rounded p-3">
+      <div class="text-xs text-slate-500">Лимит</div>
+      <div class="text-2xl font-bold">{{ job.limit_count or '—' }}</div>
+    </div>
+    <div class="bg-slate-50 rounded p-3">
+      <div class="text-xs text-slate-500">Кампусы</div>
+      <div class="text-sm font-mono">{{ job.campus_id or 'все' }}</div>
+    </div>
+  </div>
+
+  {% if job.total and job.total > 0 %}
+  <div class="mt-4">
+    <div class="text-xs text-slate-500 mb-1">Прогресс: {{ job.processed }} / {{ job.total }} ({{ (job.processed * 100 / job.total)|round(1) }}%)</div>
+    <div class="progress"><div style="width: {{ (job.processed * 100 / job.total)|round(1) }}%"></div></div>
+  </div>
+  {% endif %}
+
+  <div class="grid grid-cols-2 gap-4 mt-6 text-sm">
+    <div>
+      <span class="text-slate-500">Стартовал:</span>
+      <span class="font-mono">{{ job.started_at.strftime('%Y-%m-%d %H:%M:%S UTC') if job.started_at else '—' }}</span>
+    </div>
+    <div>
+      <span class="text-slate-500">Завершён:</span>
+      <span class="font-mono">{{ job.finished_at.strftime('%Y-%m-%d %H:%M:%S UTC') if job.finished_at else '—' }}</span>
+    </div>
+  </div>
+
+  {% if job.error %}
+  <div class="mt-4 bg-rose-50 border border-rose-200 rounded p-3">
+    <div class="text-xs text-rose-600 font-semibold mb-1">Ошибка:</div>
+    <pre class="text-xs whitespace-pre-wrap text-rose-700">{{ job.error }}</pre>
+  </div>
+  {% endif %}
+
+  {% if is_running %}
+    <form method="post" action="/admin/scrape/{{ job.job_id }}/cancel" class="mt-6">
+      <button type="submit"
+              class="px-4 py-2 bg-rose-600 text-white rounded hover:bg-rose-700"
+              onclick="return confirm('Точно остановить джоб?');">
+        ⊘ Остановить
+      </button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}
