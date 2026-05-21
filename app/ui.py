@@ -85,15 +85,27 @@ def _pub_to_dict(p: Publication, authors: list[AuthorRef] | None = None) -> dict
 
 # === GET / (home — search) ===
 
+_EXP_PAGE_SIZE = 5
+_EXP_MAX_PAGE = 10  # после top-50 cosine-score обычно уже мусорный
+
+
 @router.get("/", response_class=HTMLResponse)
 async def home(
     request: Request,
     q: str | None = None,
     campus_id: str | None = None,
     faculty: str | None = None,
+    exp_page: int = Query(1, ge=1, le=_EXP_MAX_PAGE),
     db: AsyncSession = Depends(get_session),
 ):
     faculty = (faculty or "").strip()
+
+    def exp_page_url(new_page: int) -> str:
+        params: dict[str, Any] = {"exp_page": new_page}
+        if q: params["q"] = q
+        if campus_id: params["campus_id"] = campus_id
+        if faculty: params["faculty"] = faculty
+        return "/?" + urlencode(params) + "#experts"
 
     ctx: dict[str, Any] = {
         "request": request,
@@ -104,6 +116,10 @@ async def home(
         "units": await _list_units(db),
         "experts": [],
         "experts_error": None,
+        "exp_page": exp_page,
+        "exp_max_page": _EXP_MAX_PAGE,
+        "exp_has_next": False,
+        "exp_page_url": exp_page_url,
         "publications": [],
         "publications_total": 0,
         "courses": [],
@@ -113,11 +129,19 @@ async def home(
     if q and len(q) >= 2:
         like = f"%{q}%"
 
-        # === Experts (vector) ===
+        # === Experts (vector) с пагинацией ===
         try:
+            # Запрашиваем page_size+1 чтобы понять, есть ли следующая страница.
             exp_rows, top_pubs = await vector_search_persons(
-                db, q, limit=20, campus_id=campus_id, primary_unit=faculty or None,
+                db, q,
+                limit=_EXP_PAGE_SIZE + 1,
+                offset=(exp_page - 1) * _EXP_PAGE_SIZE,
+                campus_id=campus_id, primary_unit=faculty or None,
             )
+            ctx["exp_has_next"] = (
+                len(exp_rows) > _EXP_PAGE_SIZE and exp_page < _EXP_MAX_PAGE
+            )
+            exp_rows = exp_rows[:_EXP_PAGE_SIZE]
             ctx["experts"] = [
                 {
                     "person_id": person.person_id,

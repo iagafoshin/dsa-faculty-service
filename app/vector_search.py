@@ -20,6 +20,7 @@ async def vector_search_persons(
     q: str,
     *,
     limit: int = 20,
+    offset: int = 0,
     campus_id: str | None = None,
     primary_unit: str | None = None,
     has_publications: bool | None = None,
@@ -52,7 +53,7 @@ async def vector_search_persons(
         stmt = stmt.where(Person.publications_total > 0)
     elif has_publications is False:
         stmt = stmt.where(Person.publications_total == 0)
-    stmt = stmt.order_by(Person.embedding.cosine_distance(q_vec)).limit(limit)
+    stmt = stmt.order_by(Person.embedding.cosine_distance(q_vec)).limit(limit).offset(offset)
     rows = (await db.execute(stmt)).all()
 
     person_ids = [r[0].person_id for r in rows]
