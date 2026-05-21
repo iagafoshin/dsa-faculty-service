@@ -170,6 +170,10 @@ _SERVICE_PREFIXES: set[str] = {
 
 _NUMERIC_CHARS = set("0123456789 .,–—-/")
 _GG_RE = re.compile(r"\bгг?\.?\b", re.IGNORECASE)
+# 4-значный год (1900-2099) в начале тега. Такие теги почти всегда мусор
+# вида «2020 году научно», «2024 центр пространственного» — обрезки
+# биографий или дат событий.
+_LEADING_YEAR_RE = re.compile(r"^(?:19|20)\d{2}\b")
 
 
 def _contains_org_indicator(tag: str) -> bool:
@@ -240,6 +244,10 @@ def apply_filters(
         # (5) служебный префикс или слишком короткое первое слово
         first = tokens[0]
         if len(first) < 3 or first in _SERVICE_PREFIXES:
+            continue
+
+        # (5b) первый токен — 4-значный год (тег вроде «2020 году научно»)
+        if _LEADING_YEAR_RE.match(tag):
             continue
 
         # (6) доля цифр/служебных знаков >= 40%

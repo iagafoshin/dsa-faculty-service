@@ -58,6 +58,8 @@ def build_person_context(
 
     # Уникальные курсы — один title раз (курс может вестись несколько лет /
     # в разных группах, но семантически это один и тот же сигнал).
+    # БЕЗ заголовка «Преподаваемые курсы:» — в v3 убрали, потому что
+    # KeyBERT тянул сам header в топ-тегов («преподаваемые курсы» — 144 раза).
     seen_titles: set[str] = set()
     course_lines: list[str] = []
     for c in courses:
@@ -66,7 +68,7 @@ def build_person_context(
             seen_titles.add(title)
             course_lines.append(title)
     if course_lines:
-        parts.append("Преподаваемые курсы:\n" + "\n".join(course_lines))
+        parts.append("\n".join(course_lines))
 
     text = "\n\n".join(parts)
     if len(text) > _MAX_PERSON_CTX:
