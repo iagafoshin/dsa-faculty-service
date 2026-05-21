@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sqlalchemy import select  # noqa: E402
 
 from app.database import AsyncSessionLocal  # noqa: E402
-from app.models import Authorship, Person, Publication  # noqa: E402
+from app.models import Authorship, Course, Person, Publication  # noqa: E402
 from app.nlp.extractor import extract_topics, get_device  # noqa: E402
 from app.nlp.person_context import build_person_context  # noqa: E402
 
@@ -54,7 +54,12 @@ async def main() -> None:
                 .limit(30)
             )).scalars().all()
 
-            ctx = build_person_context(p, pubs)
+            courses = (await s.execute(
+                select(Course).where(Course.person_id == p.person_id)
+                .order_by(Course.academic_year.desc().nullslast())
+            )).scalars().all()
+
+            ctx = build_person_context(p, pubs, courses)
             tags = extract_topics(ctx, person_name=p.full_name)
 
             print(f"\n=== {p.full_name} ({p.primary_unit}) — person_id={pid} ===")

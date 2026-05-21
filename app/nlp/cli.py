@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tqdm import tqdm
 
 from app.database import AsyncSessionLocal
-from app.models import Authorship, Person, Publication
+from app.models import Authorship, Course, Person, Publication
 from app.nlp.embedder import embed_batch
 from app.nlp.extractor import extract_topics_batch, get_device
 from app.nlp.person_context import build_person_context, build_publication_context
@@ -52,6 +52,23 @@ async def _fetch_pubs_for_persons(
     for pid, pub in rows:
         if len(out[pid]) < per_person:
             out[pid].append(pub)
+    return out
+
+
+async def _fetch_courses_for_persons(
+    s: AsyncSession, person_ids: list[int],
+) -> dict[int, list[Course]]:
+    """{person_id: [Course, ...]} — ВСЕ курсы персон в батче за один запрос.
+    Дедуп по title происходит позже, в build_person_context.
+    """
+    rows = (await s.execute(
+        select(Course)
+        .where(Course.person_id.in_(person_ids))
+        .order_by(Course.person_id, Course.academic_year.desc().nullslast())
+    )).scalars().all()
+    out: dict[int, list[Course]] = {pid: [] for pid in person_ids}
+    for c in rows:
+        out[c.person_id].append(c)
     return out
 
 
@@ -97,9 +114,14 @@ async def enrich_persons(
 
             person_ids = [p.person_id for p in persons]
             pubs_by_person = await _fetch_pubs_for_persons(s, person_ids)
+            courses_by_person = await _fetch_courses_for_persons(s, person_ids)
 
             contexts_all = [
-                build_person_context(p, pubs_by_person.get(p.person_id, []))
+                build_person_context(
+                    p,
+                    pubs_by_person.get(p.person_id, []),
+                    courses_by_person.get(p.person_id, []),
+                )
                 for p in persons
             ]
 

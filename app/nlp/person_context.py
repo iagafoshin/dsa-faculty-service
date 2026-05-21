@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from app.models import Person, Publication
+from app.models import Course, Person, Publication
 from app.publication_enrichment import clean_html
 
 _MAX_PERSON_CTX = 5000
@@ -29,10 +29,13 @@ def _take_lines(items: Iterable[Any], limit: int | None = None) -> list[str]:
 
 
 def build_person_context(
-    person: Person, publications: list[Publication],
+    person: Person,
+    publications: list[Publication],
+    courses: list[Course],
 ) -> str:
     """Склеивает имя, интересы, биографию, опыт, заголовки и абстракты
-    последних публикаций в один текст (~5000 символов).
+    последних публикаций + уникальные названия преподаваемых курсов
+    в один текст (~5000 символов).
     """
     parts: list[str] = [person.full_name]
 
@@ -60,6 +63,18 @@ def build_person_context(
             pub_lines.append(abstract)
     if pub_lines:
         parts.append(" ".join(pub_lines))
+
+    # Уникальные курсы — один title раз (курс может вестись несколько лет /
+    # в разных группах, но семантически это один и тот же сигнал).
+    seen_titles: set[str] = set()
+    course_lines: list[str] = []
+    for c in courses:
+        title = (c.title or "").strip()
+        if title and title not in seen_titles:
+            seen_titles.add(title)
+            course_lines.append(title)
+    if course_lines:
+        parts.append("Преподаваемые курсы:\n" + "\n".join(course_lines))
 
     text = "\n\n".join(parts)
     if len(text) > _MAX_PERSON_CTX:
