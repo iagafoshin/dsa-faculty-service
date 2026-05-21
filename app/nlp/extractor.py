@@ -20,14 +20,23 @@ import torch
 from keybert import KeyBERT
 from sentence_transformers import SentenceTransformer
 
-from app.nlp.stopwords import EN_STOPWORDS, RU_STOPWORDS
+from app.nlp.stopwords import EN_STOPWORDS, JUNK_PHRASES, ORG_INDICATORS, RU_STOPWORDS
 
 logger = logging.getLogger(__name__)
 
 EMBED_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 
 # Типы сущностей spaCy, которые считаем потенциальными тегами.
-_SPACY_ENTITY_TYPES = {"ORG", "PRODUCT", "WORK_OF_ART", "LAW", "EVENT", "NORP"}
+# ORG специально исключён: названия организаций — это не профессиональные
+# интересы, а контекст («Институт когнитивных нейронаук» ≠ когнитивные
+# нейронауки). Их собираем отдельно в reject-набор (см. _SPACY_REJECT_TYPES).
+_SPACY_ENTITY_TYPES = {"PRODUCT", "WORK_OF_ART", "LAW", "EVENT", "NORP"}
+
+# Типы сущностей spaCy, которые отсекаем — если КandyBERT выдал фразу,
+# текстуально совпадающую с одной из этих сущностей, выбрасываем.
+# GPE — англ. геополит. сущности (en_core_web_sm), LOC — её русский аналог
+# (ru_core_news_lg).
+_SPACY_REJECT_TYPES = {"ORG", "GPE", "LOC", "DATE"}
 
 # Лениво-инициализируемые синглтоны.
 _device: str | None = None
@@ -115,19 +124,6 @@ def _normalize(tag: str) -> str:
     return tag
 
 
-def _is_garbage(tag: str, stopwords: set[str]) -> bool:
-    if len(tag) < 3:
-        return True
-    if tag.isdigit():
-        return True
-    if tag in stopwords:
-        return True
-    tokens = tag.split()
-    if tokens and all(t in stopwords for t in tokens):
-        return True
-    return False
-
-
 def _dedupe_substrings(tags: list[str]) -> list[str]:
     """Если есть «машинное обучение» и «обучение» — оставляем только длинный."""
     sorted_tags = sorted(set(tags), key=lambda t: (-len(t), t))
@@ -139,43 +135,168 @@ def _dedupe_substrings(tags: list[str]) -> list[str]:
     return kept
 
 
-def _collect_spacy_candidates(doc) -> list[str]:
-    out: list[str] = []
+def _collect_spacy_candidates(doc) -> tuple[list[str], list[str]]:
+    """Возвращает `(candidates, rejects)`: первое — кандидаты в теги (entities
+    нужных типов + noun_chunks), второе — тексты ORG/GPE/LOC/DATE сущностей
+    для последующего отсева в `apply_filters`.
+    """
+    candidates: list[str] = []
+    rejects: list[str] = []
     for ent in doc.ents:
         if ent.label_ in _SPACY_ENTITY_TYPES:
-            out.append(ent.text)
-    for nc in doc.noun_chunks:
-        if 1 <= len(nc.text.split()) <= 4:
-            out.append(nc.text)
-    return out
+            candidates.append(ent.text)
+        elif ent.label_ in _SPACY_REJECT_TYPES:
+            rejects.append(ent.text)
+    try:
+        for nc in doc.noun_chunks:
+            if 1 <= len(nc.text.split()) <= 4:
+                candidates.append(nc.text)
+    except NotImplementedError:
+        # ru_core_news_lg не реализует noun_chunks — для русского
+        # роль n-грамм играет KeyBERT.
+        pass
+    return candidates, rejects
+
+
+# === Post-processing фильтры (v2) ===
+
+# Служебные предлоги/частицы, с которых тег начинаться не должен.
+_SERVICE_PREFIXES: set[str] = {
+    "в", "с", "на", "по", "при", "для", "из", "к", "у", "от", "со",
+    "об", "о", "под", "над", "до", "после", "за", "из-за",
+    "г", "гг", "ходе", "том", "тех", "то", "та", "те",
+    "the", "of", "in", "on", "at", "by", "to", "for", "from",
+}
+
+_NUMERIC_CHARS = set("0123456789 .,–—-/")
+_GG_RE = re.compile(r"\bгг?\.?\b", re.IGNORECASE)
+
+
+def _contains_org_indicator(tag: str) -> bool:
+    """Substring-проверка против ORG_INDICATORS. Для очень коротких токенов
+    (< 4 симв) — word-boundary (иначе «рана» содержит «ран»). Для 4+ симв —
+    обычная подстрока, ловит все падежи: «школ» → «школа/школу/школы»."""
+    for ind in ORG_INDICATORS:
+        if len(ind) < 4:
+            if re.search(rf"\b{re.escape(ind)}\b", tag):
+                return True
+        elif ind in tag:
+            return True
+    return False
+
+
+def _numeric_ratio(tag: str) -> float:
+    if not tag:
+        return 0.0
+    n = sum(1 for c in tag if c in _NUMERIC_CHARS)
+    for m in _GG_RE.finditer(tag):
+        n += len(m.group())
+    return n / len(tag)
+
+
+def apply_filters(
+    tags: list[str],
+    person_name: str = "",
+    ner_rejects: set[str] | None = None,
+) -> list[str]:
+    """Прогоняет кандидатов через 9 правил v2-итерации.
+
+    Порядок проверок выбран так, чтобы максимально дешёвые/частые отсевы шли
+    первыми (стоп-имя, ORG-маркеры), дедупликация по подстроке — последней.
+    """
+    stopwords = RU_STOPWORDS | EN_STOPWORDS
+
+    name_tokens: set[str] = set()
+    if person_name:
+        for word in re.split(r"\s+", person_name.lower()):
+            cleaned = word.strip(_STRIP_CHARS)
+            if len(cleaned) > 3:
+                name_tokens.add(cleaned)
+
+    rejects = {r.lower() for r in (ner_rejects or set())}
+
+    keep: list[str] = []
+    for raw_tag in tags:
+        tag = (raw_tag or "").strip()
+        if not tag:
+            continue
+
+        # (2) имя/фамилия персоны
+        if any(nt in tag for nt in name_tokens):
+            continue
+
+        # (3) маркеры организаций — высший приоритет
+        if _contains_org_indicator(tag):
+            continue
+
+        # (4) тексты ORG/GPE/LOC/DATE из spaCy
+        if any(rej and rej in tag for rej in rejects):
+            continue
+
+        tokens = tag.split()
+        if not tokens:
+            continue
+
+        # (5) служебный префикс или слишком короткое первое слово
+        first = tokens[0]
+        if len(first) < 3 or first in _SERVICE_PREFIXES:
+            continue
+
+        # (6) доля цифр/служебных знаков >= 40%
+        if _numeric_ratio(tag) >= 0.4:
+            continue
+
+        # (7) шаблоны-паразиты
+        if any(j in tag for j in JUNK_PHRASES):
+            continue
+
+        # (9) min длина 4 + хотя бы одно содержательное слово ≥4 симв
+        if len(tag) < 4:
+            continue
+        if not any(len(t) >= 4 for t in tokens):
+            continue
+
+        # Существующая проверка стоп-слов (одиночные мусорные слова
+        # или фразы, целиком из стоп-слов).
+        if tag in stopwords:
+            continue
+        if all(t in stopwords for t in tokens):
+            continue
+
+        keep.append(tag)
+
+    # (8) дедуп по подстроке — длинный поглощает короткий
+    return _dedupe_substrings(keep)
 
 
 def _combine_and_rank(
     spacy_tags: list[str],
     keybert_pairs: list[tuple[str, float]],
     max_tags: int,
+    person_name: str = "",
+    ner_rejects: set[str] | None = None,
 ) -> list[str]:
-    """Объединяет кандидатов, фильтрует, возвращает топ по итоговому скору.
+    """Объединяет кандидатов, прогоняет через v2-фильтры, возвращает топ
+    по итоговому скору.
 
     spaCy-кандидатам даём базовый скор 0.6 (NER приоритетнее низкорейтинговых
     фраз KeyBERT), KeyBERT — фактический скор. При совпадении берём max.
     """
-    stopwords = RU_STOPWORDS | EN_STOPWORDS
     candidates: dict[str, float] = {}
 
     for tag in spacy_tags:
         norm = _normalize(tag)
-        if not norm or _is_garbage(norm, stopwords):
+        if not norm:
             continue
         candidates[norm] = max(candidates.get(norm, 0.0), 0.6)
 
     for tag, score in keybert_pairs:
         norm = _normalize(tag)
-        if not norm or _is_garbage(norm, stopwords):
+        if not norm:
             continue
         candidates[norm] = max(candidates.get(norm, 0.0), float(score))
 
-    kept = _dedupe_substrings(list(candidates.keys()))
+    kept = apply_filters(list(candidates.keys()), person_name=person_name, ner_rejects=ner_rejects)
     kept.sort(key=lambda t: -candidates.get(t, 0.0))
     return kept[:max_tags]
 
@@ -196,37 +317,64 @@ def _keybert_keywords(text: str, max_tags: int) -> list[tuple[str, float]]:
         return []
 
 
-def extract_topics(text: str, max_tags: int = 15) -> list[str]:
-    """Извлекает до `max_tags` тегов из одного текста."""
+def extract_topics(
+    text: str,
+    max_tags: int = 15,
+    person_name: str = "",
+) -> list[str]:
+    """Извлекает до `max_tags` тегов из одного текста.
+
+    `person_name` пробрасывается в фильтр имени-персоны (см. apply_filters).
+    """
     if not text or len(text) < 50:
         return []
     lang = detect_lang(text)
 
     spacy_tags: list[str] = []
+    ner_rejects: set[str] = set()
     if lang in ("ru", "mixed"):
-        spacy_tags.extend(_collect_spacy_candidates(_get_spacy_ru()(text)))
+        c, r = _collect_spacy_candidates(_get_spacy_ru()(text))
+        spacy_tags.extend(c)
+        ner_rejects.update(s.lower() for s in r)
     if lang in ("en", "mixed"):
-        spacy_tags.extend(_collect_spacy_candidates(_get_spacy_en()(text)))
+        c, r = _collect_spacy_candidates(_get_spacy_en()(text))
+        spacy_tags.extend(c)
+        ner_rejects.update(s.lower() for s in r)
 
     keybert_pairs = _keybert_keywords(text, max_tags)
-    return _combine_and_rank(spacy_tags, keybert_pairs, max_tags)
+    return _combine_and_rank(
+        spacy_tags, keybert_pairs, max_tags,
+        person_name=person_name, ner_rejects=ner_rejects,
+    )
 
 
-def extract_topics_batch(texts: list[str], max_tags: int = 15) -> list[list[str]]:
-    """Батчевая версия. SpaCy через `nlp.pipe`, KeyBERT по очереди
-    (у него нет true-batch API)."""
+def extract_topics_batch(
+    texts: list[str],
+    max_tags: int = 15,
+    person_names: list[str] | None = None,
+) -> list[list[str]]:
+    """Батчевая версия. SpaCy через `nlp.pipe`, KeyBERT по очереди.
+
+    `person_names` (если задан) — список той же длины, что и `texts`;
+    каждое имя пробрасывается в свой apply_filters.
+    """
     if not texts:
         return []
+    if person_names is not None and len(person_names) != len(texts):
+        raise ValueError("person_names length must match texts length")
 
     langs = [detect_lang(t) for t in texts]
     spacy_per_text: list[list[str]] = [[] for _ in texts]
+    rejects_per_text: list[set[str]] = [set() for _ in texts]
 
     def _run_pipe(nlp, indices: list[int]) -> None:
         if not indices:
             return
         chunks = [texts[i] for i in indices]
         for idx, doc in zip(indices, nlp.pipe(chunks)):
-            spacy_per_text[idx].extend(_collect_spacy_candidates(doc))
+            c, r = _collect_spacy_candidates(doc)
+            spacy_per_text[idx].extend(c)
+            rejects_per_text[idx].update(s.lower() for s in r)
 
     _run_pipe(_get_spacy_ru(), [i for i, l in enumerate(langs) if l in ("ru", "mixed")])
     _run_pipe(_get_spacy_en(), [i for i, l in enumerate(langs) if l in ("en", "mixed")])
@@ -237,5 +385,9 @@ def extract_topics_batch(texts: list[str], max_tags: int = 15) -> list[list[str]
             out.append([])
             continue
         kb_pairs = _keybert_keywords(text, max_tags)
-        out.append(_combine_and_rank(spacy_per_text[i], kb_pairs, max_tags))
+        pname = person_names[i] if person_names else ""
+        out.append(_combine_and_rank(
+            spacy_per_text[i], kb_pairs, max_tags,
+            person_name=pname, ner_rejects=rejects_per_text[i],
+        ))
     return out
