@@ -1,109 +1,143 @@
 # Прод-деплой DSA Faculty Service
 
-Целевая конфигурация:
+Конфигурация:
 
 ```
-       internet
-          │ :443 (https) / :80 (redirect)
+       internet :443
+          │  (TLS — host-nginx с certbot)
           ▼
-       ┌──────────┐
-       │  Caddy   │  auto-TLS (Let's Encrypt) + basic-auth для /admin/*
-       └────┬─────┘
-            │ docker-network
-            ▼
-       ┌──────────┐        ┌────────┐
-       │   app    │ ─SQL→ │   db   │  ← порт 5433 только на 127.0.0.1
-       │ (uvicorn)│        │ pgvect │     (для SSH-туннеля при sync)
-       └──────────┘        └────────┘
+   ┌──────────────┐
+   │ host nginx   │  proxy_pass → 127.0.0.1:8000
+   └──────┬───────┘
+          │
+          ▼
+   ┌──────────┐       ┌────────┐
+   │   app    │  SQL→ │   db   │   127.0.0.1:5433 на хосте
+   │ (uvicorn)│       │ pgvect │   (для SSH-туннеля)
+   └──────────┘       └────────┘
+       docker network
 ```
 
+- TLS терминируется **host-nginx**'ом (уже стоит на сервере, нужен certbot).
+- App слушает только `127.0.0.1:8000` — снаружи недоступен напрямую.
 - Postgres снаружи **не доступен** — только через docker-network для app
-  и через SSH-туннель к `127.0.0.1:5433` для разовых задач.
-- App снаружи **не доступен напрямую** — только через Caddy.
-- `/admin/*`, `/api/v1/admin/*`, `/docs` закрыты basic-auth на уровне Caddy.
+  и через SSH-туннель к `127.0.0.1:5433`.
 
 ---
 
-## 0. Что должно быть до старта
+## 0. Что должно быть
 
-- **VPS** на Ubuntu/Debian (минимум **2 vCPU + 4GB RAM** — нужно для torch
-  + model in memory; **2GB SSD** под Docker-образ + ~1GB под Postgres-данные)
-- **Домен** с A-записью на IP сервера (для Let's Encrypt)
-- **SSH-ключ** для GitHub Actions (deploy без пароля)
-- **Локальная БД** уже обогащена через `python -m app.nlp enrich-*`
+- **VPS** на Ubuntu/Debian (≥ 2 vCPU + 4GB RAM — нужен torch + model)
+- **nginx** на хосте, с TLS (certbot)
+- **Домен** с A-записью на IP сервера
+- **SSH-ключ** для GitHub Actions
+- **Локальная БД** обогащена через `python -m app.nlp enrich-*`
 
 ---
 
-## 1. Подготовка VPS
+## 1. Подготовка VPS (если ещё не делал)
 
 ```bash
-# Локально:
-ssh root@your-vps-ip
-
-# На сервере: создаём пользователя для деплоя
-adduser dsa
-usermod -aG sudo dsa
+# Создать deploy-пользователя
+adduser dsa && usermod -aG sudo dsa
 mkdir -p /home/dsa/.ssh
-# Положи туда свой ssh-публичный ключ:
-nano /home/dsa/.ssh/authorized_keys
+# положи свой публичный ssh-ключ
 chmod 700 /home/dsa/.ssh
 chmod 600 /home/dsa/.ssh/authorized_keys
 chown -R dsa:dsa /home/dsa/.ssh
-```
 
-### SSH hardening
-
-```bash
-# /etc/ssh/sshd_config — отключи парольный логин и root
+# SSH hardening
 sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
 sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
 systemctl restart ssh
-```
 
-### Firewall (UFW)
-
-```bash
+# Firewall
 apt install -y ufw
 ufw default deny incoming
 ufw default allow outgoing
-ufw allow 22/tcp     # SSH
-ufw allow 80/tcp     # HTTP (Caddy redirects → 443)
-ufw allow 443/tcp    # HTTPS
+ufw allow 22/tcp
+ufw allow 80/tcp     # для certbot + redirect 80→443
+ufw allow 443/tcp
 ufw --force enable
-ufw status
-```
 
-**Postgres-порт 5432/5433 НЕ открываем** — он биндится только на
-`127.0.0.1` внутри docker-compose.prod.yml. Доступ к БД снаружи —
-ТОЛЬКО через SSH-туннель.
-
-### Fail2ban (защита от brute-force SSH)
-
-```bash
+# Brute-force защита SSH
 apt install -y fail2ban
 systemctl enable --now fail2ban
-```
 
-### Docker + compose
-
-```bash
+# Docker
 curl -fsSL https://get.docker.com | sh
 usermod -aG docker dsa
-```
 
-### Auto-updates безопасности
-
-```bash
+# Auto-updates безопасности
 apt install -y unattended-upgrades
 dpkg-reconfigure -plow unattended-upgrades
 ```
 
+Postgres-порт **НЕ открываем** — он биндится только на `127.0.0.1`.
+
 ---
 
-## 2. Клонирование репо
+## 2. host-nginx
+
+Если уже стоит и работает на твоём домене с certbot — пропусти. Иначе
+типовой конфиг (`/etc/nginx/sites-available/faculty`):
+
+```nginx
+server {
+    listen 80;
+    server_name faculty.example.ru;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name faculty.example.ru;
+
+    ssl_certificate     /etc/letsencrypt/live/faculty.example.ru/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/faculty.example.ru/privkey.pem;
+
+    # Защита админ-путей basic-auth'ом
+    location ~ ^/(admin|api/v1/admin|docs|redoc|openapi\.json) {
+        auth_basic           "Restricted";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Security headers
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+}
+```
 
 ```bash
-# На сервере под пользователем dsa:
+# Создать htpasswd для basic-auth на /admin
+apt install -y apache2-utils
+htpasswd -c /etc/nginx/.htpasswd admin
+
+# Получить TLS-сертификат
+apt install -y certbot python3-certbot-nginx
+certbot --nginx -d faculty.example.ru
+
+ln -s /etc/nginx/sites-available/faculty /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+```
+
+---
+
+## 3. Клонирование репо
+
+```bash
 sudo mkdir -p /opt/dsa-faculty-service
 sudo chown dsa:dsa /opt/dsa-faculty-service
 cd /opt
@@ -113,76 +147,61 @@ cd dsa-faculty-service
 
 ---
 
-## 3. Секреты — `.env`
+## 4. Секреты — `.env`
 
 ```bash
 cp .env.example .env
-nano .env
-```
 
-Заполни **сильными значениями**:
-
-```bash
-# Сгенерировать random-токен:
+# Сгенерировать random:
 openssl rand -hex 24    # для ADMIN_TOKEN
 openssl rand -hex 24    # для POSTGRES_PASSWORD
 
-# Bcrypt-хеш для basic-auth на /admin:
-docker run --rm caddy:2-alpine caddy hash-password
-# Введи пароль (он будет вводиться в браузере)
-# Скопируй полученный хеш в CADDY_ADMIN_HASH
+nano .env
+chmod 600 .env
 ```
 
 Минимально:
 
 ```env
-DOMAIN=faculty.example.ru
-POSTGRES_PASSWORD=<длинный-random-32-симв>
-DATABASE_URL=postgresql+asyncpg://postgres:<тот-же-PASSWORD>@db:5432/hse_faculty
+POSTGRES_PASSWORD=<длинный-random>
+DATABASE_URL=postgresql+asyncpg://postgres:<тот-же>@db:5432/hse_faculty
 ADMIN_TOKEN=<длинный-random>
-CADDY_ADMIN_USER=admin
-CADDY_ADMIN_HASH=$2a$14$ABC...
 CORS_ORIGINS=https://faculty.example.ru
+APP_NAME=dsa-faculty-service
+APP_VERSION=0.4.0
+LOG_LEVEL=INFO
+POSTGRES_USER=postgres
+POSTGRES_DB=hse_faculty
 ```
-
-**`chmod 600 .env`** — права только владельцу.
 
 ---
 
-## 4. Первый деплой
+## 5. Первый деплой
 
 ```bash
 cd /opt/dsa-faculty-service
-docker compose -f docker-compose.prod.yml up -d --build
-# Первый билд занимает 5–10 минут (NLP-extras + spaCy-модели).
 
-# Миграции
+# Прод-сборка с NLP-extras (Dockerfile.prod). ~5-7 минут на холодную.
+docker compose -f docker-compose.prod.yml up -d --build
+
 sleep 10
 docker compose -f docker-compose.prod.yml exec -T app alembic upgrade head
 
-# Проверка
-curl -k https://faculty.example.ru/api/v1/health
-# {"status": "ok", "version": "0.4.0"}
-
-curl -k https://faculty.example.ru/api/v1/meta/campuses
-# [...4 campuses...]
+# Проверка (через host-nginx с TLS)
+curl https://faculty.example.ru/api/v1/health
+# {"status": "ok", ...}
 ```
-
-Caddy сам получит TLS-сертификат от Let's Encrypt при первом запросе
-(нужны открытые порты 80/443 + правильный DNS).
 
 ---
 
-## 5. Перенос NLP-обогащения с локалки на прод
+## 6. Перенос NLP-обогащения с локалки на прод
 
-NLP-batch (enrich-persons / enrich-publications) на сервере **НЕ запускаем**
-— это часовая операция, требующая много RAM. Считаем локально (где есть
-MPS/GPU), потом синкаем embeddings.
+NLP-batch (enrich-persons / enrich-publications) на сервере **НЕ запускаем**.
+Считаем локально (MPS/GPU), потом синкаем embeddings.
 
 ```bash
 # Локально: открой SSH-туннель в отдельном терминале
-ssh -L 5434:127.0.0.1:5433 dsa@your-vps.example.ru
-# Туннель: localhost:5434 (твоя машина) → 127.0.0.1:5433 (прод-db)
+ssh -L 5434:127.0.0.1:5433 dsa@faculty.example.ru
 
 # В другом терминале (тоже локально):
 DATABASE_URL_LOCAL='postgresql+asyncpg://postgres:LOCAL_PWD@localhost:5433/hse_faculty' \
@@ -190,60 +209,46 @@ DATABASE_URL_PROD='postgresql+asyncpg://postgres:PROD_PWD@localhost:5434/hse_fac
 .venv/bin/python scripts/sync_embeddings_to_prod.py
 ```
 
-Скрипт перенесёт:
-- `persons.embedding` + `persons.interests_extracted` (≈5984 строк)
-- `publications.embedding` + `publications.topics` (≈71115 строк)
+Перенесёт:
+- `persons.embedding` + `persons.interests_extracted`
+- `publications.embedding` + `publications.topics`
 
-Время: ~5-10 минут (SQL UPDATE по сети).
-
-Идемпотентно. Если локально сделал новый enrich — запусти снова, новое
-попадёт в прод.
-
-**Проверка:**
-```bash
-curl -u admin:PASSWORD -k 'https://faculty.example.ru/api/v1/experts/search?q=machine+learning&limit=3'
-# должны быть results с score>0 и matched_topics
-```
+Время: ~5-10 минут. Идемпотентно (запустишь снова — обновятся только
+новые/изменённые).
 
 ---
 
-## 6. Скрейп новых данных на сервере
+## 7. CI/CD
 
-Скрейпер сам по себе **не** требует NLP, гонять можно прямо на проде:
+`.github/workflows/deploy.yml` уже настроен. В **Settings → Secrets** репы:
 
-```bash
-# Через UI (basic-auth откроет popup):
-open https://faculty.example.ru/admin
+| Secret | Значение |
+|---|---|
+| `VPS_HOST` | IP сервера или DNS |
+| `VPS_USER` | `dsa` |
+| `SSH_PRIVATE_KEY` | приватный ключ той пары, чей публичный лежит на сервере |
 
-# Или через JSON API:
-curl -u admin:PASSWORD -X POST \
-  -H "X-Admin-Token: <ADMIN_TOKEN>" \
-  "https://faculty.example.ru/api/v1/admin/scrape?limit=100"
-```
-
-После прихода новых данных — **прогон enrich локально + sync**.
+Дальше push в `main` → автодеплой.
 
 ---
 
-## 7. Чек-лист безопасности
+## 8. Чек-лист безопасности
 
-- [ ] Postgres-порт 5432/5433 закрыт в UFW (доступен только через docker-network)
+- [ ] Postgres-порт `5432/5433` закрыт в UFW (только `127.0.0.1`)
 - [ ] SSH: ключи only, no root, no password
 - [ ] `.env` chmod 600, не в git
-- [ ] `ADMIN_TOKEN`, `POSTGRES_PASSWORD`, `CADDY_ADMIN_HASH` — все длинный random
+- [ ] `ADMIN_TOKEN`, `POSTGRES_PASSWORD` — длинный random (≥32 симв)
 - [ ] Fail2ban активен (`fail2ban-client status`)
-- [ ] UFW активен (`ufw status` — 22, 80, 443)
+- [ ] UFW: `22, 80, 443` (БД не торчит)
 - [ ] unattended-upgrades включены
-- [ ] TLS работает (Caddy сам подтянул сертификат)
-- [ ] `/docs` и `/admin/*` закрыты basic-auth
-- [ ] `CORS_ORIGINS` НЕ `*` в проде (укажи конкретный домен)
-- [ ] Docker app запускается под uid=1000 (не root)
+- [ ] TLS работает (certbot выдал серт)
+- [ ] `/admin/*`, `/docs` закрыты basic-auth на nginx
+- [ ] `CORS_ORIGINS` НЕ `*` (укажи свой домен)
+- [ ] Docker app запускается под `uid=1000` (см. `Dockerfile.prod`)
 
 ---
 
-## 8. Бэкапы Postgres
-
-Самый простой вариант — крон + `pg_dump`:
+## 9. Бэкапы Postgres
 
 ```bash
 # /etc/cron.daily/dsa-db-backup
@@ -252,7 +257,6 @@ mkdir -p /var/backups/dsa
 docker exec dsa-faculty-service-db-1 \
   pg_dump -U postgres hse_faculty | gzip \
   > /var/backups/dsa/db-$(date +%F).sql.gz
-# Хранить 14 дней
 find /var/backups/dsa -name 'db-*.sql.gz' -mtime +14 -delete
 ```
 
@@ -265,27 +269,3 @@ chmod +x /etc/cron.daily/dsa-db-backup
 gunzip < /var/backups/dsa/db-2026-05-22.sql.gz | \
   docker exec -i dsa-faculty-service-db-1 psql -U postgres -d hse_faculty
 ```
-
----
-
-## 9. CI/CD через GitHub Actions
-
-`.github/workflows/deploy.yml` уже настроен. Нужно положить в **Settings →
-Secrets** репы:
-
-| Secret | Значение |
-|---|---|
-| `VPS_HOST` | IP сервера или DNS |
-| `VPS_USER` | `dsa` |
-| `SSH_PRIVATE_KEY` | приватный ключ той пары, чей публичный лежит на сервере |
-
-Дальше каждый `git push` в `main` → автодеплой.
-
----
-
-## 10. Чего нет (но можно докрутить позже)
-
-- Rate-limiting на API (Caddy умеет, можно прикрутить)
-- Внешний health-check (UptimeRobot/Healthchecks.io пингует `/api/v1/health`)
-- Метрики (Prometheus + Grafana — overkill для одного сервиса)
-- Read-replica Postgres

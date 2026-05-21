@@ -1,5 +1,7 @@
-# Prod compose: db не светим наружу, app не светим напрямую,
-# наружу только Caddy на 80/443 с TLS и basic-auth на /admin/*.
+# Prod compose: app публикуется на 127.0.0.1:8000 для host-nginx (или
+# другого reverse-proxy на хосте), который сам делает TLS + проксирует.
+# db доступна только локально через 127.0.0.1:5433 — для SSH-туннеля
+# при sync_embeddings_to_prod.py. Снаружи Postgres не виден вообще.
 #
 # Использование:
 #   docker compose -f docker-compose.prod.yml up -d --build
@@ -14,9 +16,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
-    # Только localhost: используется SSH-туннелем для sync embeddings.
-    # Снаружи Postgres недоступен — никакого 0.0.0.0:5432.
     ports:
+      # Только localhost — для SSH-туннеля при sync embeddings.
       - "127.0.0.1:5433:5432"
     restart: unless-stopped
     healthcheck:
@@ -38,30 +39,12 @@ services:
       APP_VERSION: ${APP_VERSION}
       CORS_ORIGINS: ${CORS_ORIGINS}
       ADMIN_TOKEN: ${ADMIN_TOKEN}
-    # Без --reload и без volume-mount: код прибит в образе.
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    restart: unless-stopped
-    # БЕЗ блока ports: app доступен только Caddy через docker-network.
-
-  caddy:
-    image: caddy:2-alpine
-    depends_on: [app]
-    environment:
-      DOMAIN: ${DOMAIN}
-      # bcrypt-хеш basic-auth для путей /admin/*. Сгенерировать:
-      #   docker run --rm caddy:2-alpine caddy hash-password
-      CADDY_ADMIN_USER: ${CADDY_ADMIN_USER}
-      CADDY_ADMIN_HASH: ${CADDY_ADMIN_HASH}
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data       # сюда складывает Let's Encrypt сертификаты
-      - caddy_config:/config
     ports:
-      - "80:80"
-      - "443:443"
+      # Биндим на localhost — host-nginx (или другой proxy) проксирует
+      # сюда. Наружу 8000 не светим, TLS — забота nginx'а.
+      - "127.0.0.1:8000:8000"
     restart: unless-stopped
 
 volumes:
   pgdata:
-  caddy_data:
-  caddy_config:
