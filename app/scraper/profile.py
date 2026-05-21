@@ -5,8 +5,7 @@ import datetime
 from typing import Any
 
 from app.scraper import parser
-from app.scraper.client import BASE_URL, get
-from app.scraper.publications import fetch_all
+from app.scraper.client import BASE_URL, fetch_publications, get
 
 
 def _interest_to_str(item: Any) -> str:
@@ -97,7 +96,7 @@ def _compose(tree, url: str, base_url: str, publications_enabled: bool) -> dict[
     publications_total = 0
     if publications_enabled:
         try:
-            pubs, _ = fetch_all(person_id, per_page=50)
+            pubs, _ = fetch_publications(person_id, per_page=50)
             publications = pubs
             # Считаем только те, где этот человек реально автор (а не редактор/
             # переводчик). Совпадает с тем, что хранится в `authorships` для него.
