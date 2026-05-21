@@ -4,7 +4,8 @@
 # вызываем на сервере — обогащение делается локально и переносится
 # через scripts/sync_embeddings_to_prod.py.
 #
-# Размер образа ~2GB. RAM-footprint ~700MB после загрузки модели.
+# Размер образа ~2GB (с CPU-only torch). RAM-footprint ~700MB после
+# загрузки модели.
 
 FROM python:3.12-slim AS base
 
@@ -12,9 +13,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    HF_HOME=/code/.hf_cache \
-    HF_HUB_OFFLINE=1 \
-    TRANSFORMERS_OFFLINE=1
+    PIP_ROOT_USER_ACTION=ignore \
+    HF_HOME=/code/.hf_cache
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
@@ -25,16 +25,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /code
 
 COPY pyproject.toml README.md /code/
-RUN pip install --upgrade pip && pip install ".[nlp]"
 
-# Pre-download spaCy-моделей в образ. Без этого первый запрос /experts/search
-# уйдёт в HF за ~470MB и упадёт по HF_HUB_OFFLINE=1.
+# torch ставим ПЕРВЫМ из CPU-индекса PyTorch — иначе зависимости [nlp]
+# подтянут CUDA-сборку (~3GB лишнего nvidia-* в образ). На CPU-only VPS
+# CUDA не нужен.
+RUN pip install --upgrade pip \
+ && pip install --index-url https://download.pytorch.org/whl/cpu torch \
+ && pip install ".[nlp]"
+
+# Pre-download spaCy-моделей в образ (~525MB). HF_HUB_OFFLINE ещё НЕ
+# выставлен — поэтому скачивание работает.
 RUN python -m spacy download ru_core_news_lg \
  && python -m spacy download en_core_web_sm
 
-# Pre-download sentence-transformer (через HF_HOME→/code/.hf_cache).
+# Pre-download sentence-transformer в HF_HOME→/code/.hf_cache.
 RUN python -c "from sentence_transformers import SentenceTransformer; \
 SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')"
+
+# Все скачивания позади — фиксируем runtime в offline-mode, чтобы первый
+# запрос в проде не уходил в HF за обновлениями.
+ENV HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
 
 # Запускаем под не-root пользователем — снижает blast radius при компрометации.
 RUN useradd --create-home --uid 1000 app \
