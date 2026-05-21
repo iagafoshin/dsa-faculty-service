@@ -230,6 +230,26 @@ class SearchResponse(BaseModel):
     results: list[SearchHit]
 
 
+# === Эксперты — векторный поиск по теме ===
+
+class ExpertHit(BaseModel):
+    person_id: int
+    full_name: str
+    avatar: str | None = None
+    profile_url: str
+    primary_unit: str | None = None
+    campus_name: str | None = None
+    score: float
+    matched_topics: list[str] = []
+    top_publications: list[PublicationOut] = []
+
+
+class ExpertSearchResponse(BaseModel):
+    query: str
+    query_tags: list[str] = []
+    results: list[ExpertHit]
+
+
 # === Админ (скрейп-задачи) ===
 
 class ScrapeStatus(str, Enum):

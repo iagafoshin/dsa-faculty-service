@@ -7,6 +7,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.admin import router as admin_router
 from app.config import settings
+from app.experts import router as experts_router
 from app.routes import router as v1_router
 
 logging.basicConfig(
@@ -58,6 +59,7 @@ async def http_exception_handler(request, exc: StarletteHTTPException):
 
 
 app.include_router(v1_router, prefix="/api/v1")
+app.include_router(experts_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1/admin")
 
 

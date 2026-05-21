@@ -241,6 +241,27 @@ paths:
                     code: { type: string, example: ARTICLE }
                     label: { type: string, example: Научная статья }
 
+  /experts/search:
+    get:
+      tags: [experts]
+      summary: Find experts by topic (vector search)
+      description: |
+        Embeds the free-text query with a multilingual sentence-transformer and ranks
+        persons by cosine similarity over `persons.embedding` (HNSW index).
+        `matched_topics` is the intersection of query keyphrases (from KeyBERT)
+        and the person's `interests_extracted`.
+      operationId: searchExperts
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 2 }, example: "блокчейн" }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 10 } }
+        - { name: campus_id, in: query, schema: { type: string }, description: "Restrict to one campus." }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExpertSearchResponse' }
+
   /admin/scrape:
     post:
       tags: [admin]
@@ -364,6 +385,28 @@ components:
         error:        { type: string,  nullable: true }
         started_at:   { type: string,  format: date-time }
         finished_at:  { type: string,  format: date-time, nullable: true }
+
+    ExpertHit:
+      type: object
+      required: [person_id, full_name, profile_url, score]
+      properties:
+        person_id:        { type: integer }
+        full_name:        { type: string }
+        avatar:           { type: string, nullable: true }
+        profile_url:      { type: string }
+        primary_unit:     { type: string, nullable: true }
+        campus_name:      { type: string, nullable: true }
+        score:            { type: number, format: float, description: "Cosine similarity 0..1" }
+        matched_topics:   { type: array, items: { type: string } }
+        top_publications: { type: array, items: { type: object } }
+
+    ExpertSearchResponse:
+      type: object
+      required: [query, results]
+      properties:
+        query:      { type: string }
+        query_tags: { type: array, items: { type: string }, description: "Keyphrases extracted from the query" }
+        results:    { type: array, items: { $ref: '#/components/schemas/ExpertHit' } }
 
     ReadyResponse:
       type: object
