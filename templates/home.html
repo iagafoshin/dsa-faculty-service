@@ -2,18 +2,18 @@
 {% block title %}Подбор научрука · DSA Faculty{% endblock %}
 
 {% block content %}
-<div class="text-center mb-8">
-  <h1 class="text-3xl font-bold text-slate-900 mb-2">🎯 Подбор научрука для курсовой работы</h1>
-  <p class="text-slate-600">Опишите проект — найдём эксперта НИУ ВШЭ, релевантные публикации, преподаваемые курсы.</p>
+<div class="text-center mb-6 sm:mb-8">
+  <h1 class="text-xl sm:text-3xl font-bold text-slate-900 mb-2">🎯 Подбор научрука для курсовой</h1>
+  <p class="text-sm sm:text-base text-slate-600">Опишите проект — найдём эксперта НИУ ВШЭ, релевантные публикации, преподаваемые курсы.</p>
 </div>
 
-<form method="get" action="/" class="mb-8">
-  <div class="flex gap-2">
+<form method="get" action="/" class="mb-6 sm:mb-8">
+  <div class="flex flex-col sm:flex-row gap-2">
     <input type="text" name="q" value="{{ q or '' }}"
-           placeholder="Опишите свой проект... (например: «применение машинного обучения в медицинской диагностике»)"
+           placeholder="Опишите свой проект..."
            class="flex-1 px-4 py-3 rounded-lg border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none text-base"
            autofocus>
-    <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700">
+    <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 whitespace-nowrap">
       🔍 Найти
     </button>
   </div>
@@ -60,11 +60,11 @@
     {% else %}
       <div class="space-y-3">
         {% for hit in experts %}
-        <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 flex gap-4">
+        <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-3 sm:p-4 flex gap-3 sm:gap-4">
           {% if hit.avatar %}
-            <img src="{{ hit.avatar }}" class="w-24 h-24 rounded-lg object-cover flex-shrink-0">
+            <img src="{{ hit.avatar }}" class="w-16 h-16 sm:w-24 sm:h-24 rounded-lg object-cover flex-shrink-0">
           {% else %}
-            <div class="w-24 h-24 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-3xl">👤</div>
+            <div class="w-16 h-16 sm:w-24 sm:h-24 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-2xl sm:text-3xl">👤</div>
           {% endif %}
           <div class="flex-1 min-w-0">
             <div class="flex items-baseline gap-2">

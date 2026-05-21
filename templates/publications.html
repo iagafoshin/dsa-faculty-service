@@ -2,17 +2,17 @@
 {% block title %}Публикации · DSA Faculty{% endblock %}
 
 {% block content %}
-<h1 class="text-2xl font-bold mb-4">📚 Публикации</h1>
+<h1 class="text-xl sm:text-2xl font-bold mb-4">📚 Публикации</h1>
 
-<form method="get" action="/publications" class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-6">
-  <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
-    <input type="text" name="q" value="{{ q or '' }}" placeholder="Название"
-           class="md:col-span-2 px-3 py-2 rounded border border-slate-300 focus:border-indigo-500 outline-none">
+<form method="get" action="/publications" class="bg-white rounded-lg shadow-sm border border-slate-200 p-3 sm:p-4 mb-6">
+  <input type="text" name="q" value="{{ q or '' }}" placeholder="Название публикации"
+         class="w-full px-3 py-2 rounded border border-slate-300 focus:border-indigo-500 outline-none mb-3 text-base">
+  <div class="grid grid-cols-2 md:grid-cols-3 gap-2 sm:gap-3">
     <input type="number" name="year_from" value="{{ year_from or '' }}" placeholder="Год от" min="1900" max="2030"
-           class="px-3 py-2 rounded border border-slate-300">
+           class="px-3 py-2 rounded border border-slate-300 text-base">
     <input type="number" name="year_to" value="{{ year_to or '' }}" placeholder="Год до" min="1900" max="2030"
-           class="px-3 py-2 rounded border border-slate-300">
-    <select name="type" class="px-3 py-2 rounded border border-slate-300 bg-white">
+           class="px-3 py-2 rounded border border-slate-300 text-base">
+    <select name="type" class="col-span-2 md:col-span-1 px-3 py-2 rounded border border-slate-300 bg-white text-base">
       <option value="">Любой тип</option>
       {% for t in pub_types %}<option value="{{ t }}" {% if t == type %}selected{% endif %}>{{ t }}</option>{% endfor %}
     </select>

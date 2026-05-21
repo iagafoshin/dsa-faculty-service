@@ -17,20 +17,20 @@
 <body class="bg-slate-50 text-slate-800">
 
 <nav class="sticky top-0 z-10 bg-white shadow-sm border-b border-slate-200">
-  <div class="max-w-6xl mx-auto px-4 h-14 flex items-center gap-6">
-    <a href="/" class="font-bold text-lg text-indigo-700">🎓 DSA Faculty</a>
-    <a href="/" class="text-sm text-slate-600 hover:text-indigo-700">🎯 Подбор научрука</a>
-    <a href="/persons" class="text-sm text-slate-600 hover:text-indigo-700">👥 Преподаватели</a>
-    <a href="/publications" class="text-sm text-slate-600 hover:text-indigo-700">📚 Публикации</a>
+  <div class="max-w-6xl mx-auto px-3 sm:px-4 h-14 flex items-center gap-3 sm:gap-6">
+    <a href="/" class="font-bold text-lg text-indigo-700 whitespace-nowrap">🎓<span class="hidden sm:inline ml-1">DSA Faculty</span></a>
+    <a href="/" class="text-sm text-slate-600 hover:text-indigo-700 whitespace-nowrap">🎯<span class="hidden sm:inline ml-1">Подбор научрука</span></a>
+    <a href="/persons" class="text-sm text-slate-600 hover:text-indigo-700 whitespace-nowrap">👥<span class="hidden sm:inline ml-1">Преподаватели</span></a>
+    <a href="/publications" class="text-sm text-slate-600 hover:text-indigo-700 whitespace-nowrap">📚<span class="hidden sm:inline ml-1">Публикации</span></a>
     {# /admin доступен напрямую через URL, но из навбара пока скрыт —
        страница без аутентификации, не палим в публичной шапке. #}
     <div class="ml-auto text-xs text-slate-400">
-      <a href="/docs" class="hover:text-slate-600">API docs</a>
+      <a href="/docs" class="hover:text-slate-600">API</a>
     </div>
   </div>
 </nav>
 
-<main class="max-w-6xl mx-auto px-4 py-8">
+<main class="max-w-6xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
   {% block content %}{% endblock %}
 </main>
 
