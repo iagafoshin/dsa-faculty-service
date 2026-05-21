@@ -49,6 +49,19 @@
 {% else %}
 
   {# === Section 1: Experts === #}
+  {% macro experts_pagination() %}
+    {% if exp_page > 1 or exp_has_next %}
+    <nav class="flex items-center justify-center gap-1 text-sm mt-4">
+      {% if exp_page > 1 %}
+        <a href="{{ exp_page_url(exp_page - 1) }}" class="px-3 py-1 rounded border bg-white hover:bg-slate-50">← Назад</a>
+      {% endif %}
+      <span class="px-3 py-1 text-slate-500">Страница {{ exp_page }}</span>
+      {% if exp_has_next %}
+        <a href="{{ exp_page_url(exp_page + 1) }}" class="px-3 py-1 rounded border bg-white hover:bg-slate-50">Вперёд →</a>
+      {% endif %}
+    </nav>
+    {% endif %}
+  {% endmacro %}
   <section id="experts" class="mb-10 scroll-mt-16">
     <h2 class="text-xl font-bold mb-3">🎯 Эксперты по теме <span class="text-sm font-normal text-slate-500">— стр. {{ exp_page }}</span></h2>
     {% if experts_error %}
@@ -56,7 +69,8 @@
         Не удалось получить данные: {{ experts_error }}
       </div>
     {% elif not experts %}
-      <p class="text-slate-500 italic">Никого не нашли.</p>
+      <p class="text-slate-500 italic">Никого не нашли на этой странице.</p>
+      {{ experts_pagination() }}
     {% else %}
       <div class="space-y-3">
         {% for hit in experts %}
@@ -98,18 +112,7 @@
         {% endfor %}
       </div>
 
-      {# Пагинация: «Назад» если не первая страница, «Вперёд» если есть ещё #}
-      {% if exp_page > 1 or exp_has_next %}
-      <nav class="flex items-center justify-center gap-1 text-sm mt-4">
-        {% if exp_page > 1 %}
-          <a href="{{ exp_page_url(exp_page - 1) }}" class="px-3 py-1 rounded border bg-white hover:bg-slate-50">← Назад</a>
-        {% endif %}
-        <span class="px-3 py-1 text-slate-500">Страница {{ exp_page }}</span>
-        {% if exp_has_next %}
-          <a href="{{ exp_page_url(exp_page + 1) }}" class="px-3 py-1 rounded border bg-white hover:bg-slate-50">Вперёд →</a>
-        {% endif %}
-      </nav>
-      {% endif %}
+      {{ experts_pagination() }}
     {% endif %}
   </section>
 
