@@ -21,11 +21,12 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            # Прод-сборка через docker-compose.prod.yml (NLP-extras внутри
-            # Dockerfile.prod, Caddy с TLS наружу, db только на 127.0.0.1).
-            docker compose -f docker-compose.prod.yml up -d --build
+            # Прод-сборка: docker-compose поднимает db + app (с полным
+            # NLP-стеком из Dockerfile). host-nginx делает TLS наружу,
+            # сервисы биндятся только на 127.0.0.1.
+            docker compose up -d --build
 
             sleep 10
-            docker compose -f docker-compose.prod.yml exec -T app alembic upgrade head
+            docker compose exec -T app alembic upgrade head
 
             echo "✅ Deployed: $(git rev-parse --short HEAD) at $(date)"

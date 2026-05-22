@@ -1,83 +1,67 @@
 # DSA Faculty Service
 
-**DSA Faculty Service** — микросервис данных о НПР платформы **Digital Student Assistant (DSA)**. Агрегирует профили преподавателей НИУ ВШЭ (скрейпинг с hse.ru), их публикации и учебные курсы, и отдаёт их через REST API. Основной сервис (ядро DSA-бэкенда) использует этот API для фронтенда студентов.
+Сервис семантического поиска научных руководителей и экспертов по теме
+исследования среди преподавателей НИУ ВШЭ.
 
-- **Источник истины:** [`openapi.yaml`](./openapi.yaml) в корне репозитория
-- **Swagger UI** (после `make up`): http://localhost:8000/docs
-- **OpenAPI JSON:** http://localhost:8000/openapi.json
+**Демо:** https://faculty.agafoshin.ru
+
+## Что умеет
+
+- **Семантический поиск экспертов по теме** — запрос свободным текстом
+  на русском или английском («применение машинного обучения в медицине»,
+  «computer vision», «теория игр») возвращает топ преподавателей с их
+  релевантными публикациями.
+- **Семантический поиск публикаций** для подбора литературы.
+- **Скрейпинг и обновление** профилей преподавателей с hse.ru
+  (биографии, должности, публикации, курсы).
+- **Лексический поиск** по ФИО, названиям публикаций и курсов.
+- **HTML-интерфейс** и **REST API** (Swagger UI на `/docs`).
+
+База: **11 879 преподавателей**, **71 116 публикаций**, **4 851 курс**
+по 4 кампусам ВШЭ.
 
 ## Стек
 
-Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · Postgres 16 · Alembic · `httpx` + `lxml` для парсера · Docker.
+Python 3.12 · FastAPI · Postgres 16 + `pg_trgm` + `pgvector` · spaCy +
+KeyBERT + sentence-transformers (multilingual MiniLM-L12-v2) · Docker.
 
-## Быстрый старт
+## Локальный запуск
+
+В Docker — только Postgres. Сервис и NLP-команды запускаются локально
+из venv.
 
 ```bash
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -e ".[nlp]"
+python -m spacy download ru_core_news_lg
+python -m spacy download en_core_web_sm
+
 cp .env.example .env
-make up          # docker compose up -d
-make migrate     # alembic upgrade head (pg_trgm + все таблицы + сид кампусов)
-make scrape      # docker compose exec app python -m app.scraper --limit=5
-open http://localhost:8000/docs
+make db          # docker compose up -d db
+make migrate     # alembic upgrade head
+make serve       # uvicorn app.main:app --reload
 ```
 
-## Запуск парсера
+Открыть: `http://localhost:8000/` (UI), `http://localhost:8000/docs` (API).
 
-Через админ-эндпоинт:
+## Скрейпинг и обогащение
 
 ```bash
-# запустить фоновый скрейп (возвращает 202 + job_id)
-curl -X POST "http://localhost:8000/api/v1/admin/scrape?limit=5&campus_id=1125608"
-
-# опрос статуса
-curl "http://localhost:8000/api/v1/admin/scrape/<job_id>"
-
-# остановить
-curl -X POST "http://localhost:8000/api/v1/admin/scrape/<job_id>/cancel"
+make scrape                                  # python -m app.scraper --limit=5
+python -m app.nlp enrich-persons --only-empty
+python -m app.nlp enrich-publications --only-empty
 ```
 
-Или локально через CLI:
+Полный цикл (~12k преподавателей + ~71k публикаций) — около 4 часов
+на M3 Max с MPS.
+
+## Production
 
 ```bash
-make scrape   # docker compose exec app python -m app.scraper --limit=5
+docker compose up -d --build
+docker compose exec app alembic upgrade head
 ```
 
-## Статус: объём v0.2
-
-**В MVP:** профили, публикации, курсы, лексический поиск (ILIKE + pg_trgm), health/ready, лента новостей (последние публикации), админ-эндпоинт для парсера.
-
-**Отложено до v1.0+:**
-- NER-теги для интересов/тематик
-- Семантический поиск (OpenSearch + SciBERT)
-- Источник новостей `hse_portal` (отдельный парсер)
-- Outbox-события для внешних потребителей
-
-## Структура проекта
-
-```
-openapi.yaml                # источник истины
-app/
-  main.py                   # FastAPI app
-  routes.py                 # все публичные эндпоинты (health, persons, publications, ...)
-  admin.py                  # админ-эндпоинты для скрейпинга
-  config.py, database.py
-  models.py                 # SQLAlchemy ORM
-  schemas.py                # Pydantic v2 модели ответов
-  publication_enrichment.py # доп. поля из raw JSONB
-  scraper/
-    __main__.py             # CLI: python -m app.scraper --limit=5
-    parser.py               # HTML → dict (со всеми normalize_*)
-    publications.py         # клиент publications.hse.ru/api/searchPubs
-    profile.py              # scrape_one_profile(url) → dict
-    crawler.py              # crawl_and_ingest()
-    ingest.py               # upsert person/publications/courses
-    client.py               # HTTP-клиент к hse.ru
-alembic/versions/           # начальная миграция (pg_trgm + таблицы + сид кампусов)
-```
-
-## Место в DSA
-
-Соседний микросервис ядра DSA-бэкенда (репозиторий `Digital-Student-Assistant`). Этот сервис отвечает за домен «преподаватели / публикации / курсы»; ядро DSA — за проекты / заявки / пользователей. Интеграция — через REST-контракт в [`openapi.yaml`](./openapi.yaml).
-
-Production: https://faculty.agafoshin.ru/docs
-
-tested ci/cd
+Прод-Dockerfile собирает образ с полным NLP-стеком и предзагруженными
+моделями (~2 GB образ, ~700 MB RAM). TLS терминируется host-nginx.
+CI/CD — GitHub Actions при push в `main`.

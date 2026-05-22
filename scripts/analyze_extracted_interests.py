@@ -4,7 +4,7 @@
 паттерны) + выгружает стратифицированную выборку из 100 персон
 с тегами для ручной оценки.
 
-Output → notes/extracted_interests_sample.md.
+Output → stdout (перенаправь в файл при необходимости).
 
 Запуск:
     DATABASE_URL=postgresql+asyncpg://postgres:CHANGE_ME@localhost:5433/hse_faculty \\

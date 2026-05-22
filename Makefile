@@ -1,28 +1,34 @@
-.PHONY: up down logs migrate revision scrape shell psql fmt build
+# Dev-команды. В Docker крутится только Postgres; FastAPI и
+# NLP-команды запускаются локально из venv (с MPS-ускорением на macOS).
+#
+# Установка venv — см. README.md.
 
-up:
-	docker compose up -d
+.PHONY: db db-down db-logs psql migrate revision serve scrape
 
-build:
-	docker compose build
+# === Postgres в Docker ===
 
-down:
+db:
+	docker compose up -d db
+
+db-down:
 	docker compose down
 
-logs:
-	docker compose logs -f app
-
-migrate:
-	docker compose exec app alembic upgrade head
-
-revision:
-	docker compose exec app alembic revision --autogenerate -m "$(m)"
-
-scrape:
-	docker compose exec app python -m app.scraper --limit=5
-
-shell:
-	docker compose exec app python
+db-logs:
+	docker compose logs -f db
 
 psql:
 	docker compose exec db psql -U postgres -d hse_faculty
+
+# === Локальные команды (требуют активного venv с [nlp] extras) ===
+
+migrate:
+	alembic upgrade head
+
+revision:
+	alembic revision --autogenerate -m "$(m)"
+
+serve:
+	uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+
+scrape:
+	python -m app.scraper --limit=5

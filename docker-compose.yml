@@ -1,3 +1,16 @@
+# Compose-конфигурация для production-деплоя на VPS.
+#
+# В dev на воркстейшне обычно поднимается **только Postgres** для
+# локального FastAPI/NLP из venv:
+#
+#   docker compose up -d db      # только postgres
+#   uvicorn app.main:app --reload   # FastAPI локально из venv
+#
+# В prod стартуют оба сервиса:
+#
+#   docker compose up -d --build
+#   docker compose exec app alembic upgrade head
+
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -8,12 +21,14 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      # Биндим на localhost, чтобы локальный venv мог достучаться
-      # (NLP-CLI запускается с воркстейшна, не из контейнера).
+      # Биндим на localhost — в dev локальный venv достучится к 5433,
+      # в prod через SSH-туннель для sync_embeddings_to_prod.py.
+      # Снаружи Postgres не виден.
       - "127.0.0.1:5433:5432"
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
-      interval: 3s
+      interval: 5s
       timeout: 3s
       retries: 10
 
@@ -28,14 +43,11 @@ services:
       APP_VERSION: ${APP_VERSION}
       CORS_ORIGINS: ${CORS_ORIGINS}
       ADMIN_TOKEN: ${ADMIN_TOKEN}
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
+      # Биндим на localhost — host-nginx (или другой proxy в проде)
+      # проксирует сюда. Наружу 8000 не светим, TLS — забота nginx'а.
       - "127.0.0.1:8000:8000"
-    volumes:
-      - ./app:/code/app
-      - ./alembic:/code/alembic
-      - ./alembic.ini:/code/alembic.ini
-      - ./templates:/code/templates
+    restart: unless-stopped
 
 volumes:
   pgdata:

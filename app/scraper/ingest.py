@@ -1,9 +1,8 @@
 """Запись (upsert) одного спарсенного преподавателя + его публикаций, авторств и курсов в БД.
 
 Доп. поля публикаций (абстракт, DOI, редакторы, обложка) и обогащение
-авторов (display_name_en, is_hse_person) парсятся ЗДЕСЬ — один раз при
-upsert, потом просто читаются из колонок. Раньше это делал отдельный
-модуль publication_enrichment.py на каждом GET-запросе.
+авторов (display_name_en, is_hse_person) парсятся здесь — один раз при
+upsert, потом просто читаются из колонок (без парсинга на read-path).
 """
 from __future__ import annotations
 
@@ -150,7 +149,7 @@ def _publication_payload(item: dict[str, Any]) -> dict[str, Any]:
         "url": None,
         "created_at": _parse_iso(item.get("createdAt")),
         "raw": item,
-        # Доп. поля (раньше доставались на read-path в publication_enrichment.py)
+        # Доп. поля — парсятся один раз при upsert, на read-path просто читаются из колонок
         "abstract_ru": _clean_html(annotation.get("ru")),
         "abstract_en": _clean_html(annotation.get("en")),
         "venue": _clean_html(description.get("api")),

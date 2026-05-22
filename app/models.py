@@ -109,8 +109,7 @@ class Publication(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     raw: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
 
-    # Поля, ранее извлекавшиеся из raw на каждый GET (см. историю
-    # app/publication_enrichment.py). Теперь парсятся один раз при upsert.
+    # Поля, извлекаемые из raw один раз при upsert (см. app/scraper/ingest.py).
     abstract_ru: Mapped[str | None] = mapped_column(String, nullable=True)
     abstract_en: Mapped[str | None] = mapped_column(String, nullable=True)
     venue: Mapped[str | None] = mapped_column(String, nullable=True)

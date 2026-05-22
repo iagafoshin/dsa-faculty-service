@@ -30,6 +30,8 @@ env/
 # Локальные планы и scratch-файлы (не коммитим)
 AGENT_PROMPT.md
 projects_raw.json
+coursework/
+THESIS_NOTES.md
 
 # Tmp от старых скрейпер-инструментов
 tmp/
