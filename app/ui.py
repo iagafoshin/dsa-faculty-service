@@ -44,6 +44,24 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent
 
 PUB_TYPES = ["ARTICLE", "BOOK", "PREPRINT", "CHAPTER", "CONFERENCE", "THESIS", "OTHER"]
 
+# Бейджи релевантности для UI. Числовой cosine score прячем — он
+# выглядит как «вероятность» и сбивает с толку (0.3 для эмбеддингов
+# MiniLM это норма «слабого матча», а не «33%»). Юзеру важна категория.
+SCORE_TIER_STRONG = 0.60   # ≥ — «высокое»
+SCORE_TIER_MEDIUM = 0.45   # ≥ — «среднее»
+SCORE_TIER_WEAK = 0.30     # ≥ — «слабое»; ниже — отбрасываем
+
+
+def _score_tier(score: float) -> tuple[str, str] | None:
+    """Возвращает (label, css_class) или None если score нужно скрыть."""
+    if score >= SCORE_TIER_STRONG:
+        return "высокое совпадение", "tier-strong"
+    if score >= SCORE_TIER_MEDIUM:
+        return "среднее совпадение", "tier-medium"
+    if score >= SCORE_TIER_WEAK:
+        return "слабое совпадение", "tier-weak"
+    return None
+
 
 async def _list_campuses(db: AsyncSession) -> list[dict[str, str]]:
     rows = (await db.execute(select(Campus).order_by(Campus.campus_name))).scalars().all()
@@ -88,6 +106,17 @@ def _pub_to_dict(p: Publication, authors: list[AuthorRef] | None = None) -> dict
 _EXP_PAGE_SIZE = 5
 _EXP_MAX_PAGE = 10  # после top-50 cosine-score обычно уже мусорный
 
+# Запросы-примеры для главной (показываются под полем поиска при пустом q).
+# Проверены руками после full re-embed с ВКР-контекстом — даём ровно те,
+# что стабильно выдают «высокое» / «среднее» совпадение в топе.
+_EXAMPLE_QUERIES = [
+    "Машинное обучение для медицинских изображений",
+    "Дообучение LLM для финансовой аналитики",
+    "Анализ временных рядов в эконометрике",
+    "Квантовые алгоритмы оптимизации",
+    "Веб-приложение для обучения программированию",
+]
+
 
 @router.get("/", response_class=HTMLResponse)
 async def home(
@@ -124,6 +153,7 @@ async def home(
         "publications_total": 0,
         "courses": [],
         "persons": [],
+        "example_queries": _EXAMPLE_QUERIES,
     }
 
     if q and len(q) >= 2:
@@ -142,8 +172,12 @@ async def home(
                 len(exp_rows) > _EXP_PAGE_SIZE and exp_page < _EXP_MAX_PAGE
             )
             exp_rows = exp_rows[:_EXP_PAGE_SIZE]
-            ctx["experts"] = [
-                {
+            experts_list: list[dict[str, Any]] = []
+            for person, c_name, score in exp_rows:
+                tier = _score_tier(float(score))
+                if tier is None:
+                    continue  # шум — не показываем
+                experts_list.append({
                     "person_id": person.person_id,
                     "full_name": person.full_name,
                     "profile_url": person.profile_url,
@@ -151,14 +185,15 @@ async def home(
                     "primary_unit": person.primary_unit,
                     "campus_name": c_name,
                     "score": float(score),
+                    "tier_label": tier[0],
+                    "tier_class": tier[1],
                     "matched_topics": compute_matched_topics(q, person.interests_extracted),
                     "top_publications": [
                         {"year": p.year, "title": p.title}
                         for p in top_pubs.get(person.person_id, [])
                     ],
-                }
-                for person, c_name, score in exp_rows
-            ]
+                })
+            ctx["experts"] = experts_list
         except Exception as e:
             # Postgres помечает транзакцию как aborted при любой SQL-ошибке;
             # без rollback все последующие запросы в этой же сессии упадут
