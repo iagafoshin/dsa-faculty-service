@@ -10,7 +10,7 @@
 <form method="get" action="/" class="mb-6 sm:mb-8">
   <div class="flex flex-col sm:flex-row gap-2">
     <input type="text" name="q" value="{{ q or '' }}"
-           placeholder="Опишите свой проект..."
+           placeholder="Опишите проект или введите фамилию..."
            class="flex-1 px-4 py-3 rounded-lg border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none text-base"
            autofocus>
     <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 whitespace-nowrap">
@@ -43,18 +43,73 @@
     💡 Опишите тему проекта или укажите фамилию интересующего преподавателя — и нажмите <b>Найти</b>.
   </div>
   <div class="text-xs text-slate-500 mb-2">Попробуйте, например:</div>
-  <div class="flex flex-wrap gap-2">
+  <div class="flex flex-wrap gap-2 mb-10">
     {% for ex in example_queries %}
       <a href="/?q={{ ex|urlencode }}#experts" class="query-chip">{{ ex }}</a>
     {% endfor %}
   </div>
+
+  {# === Browse-режим (бывший /persons) — все преподы с пагинацией === #}
+  <section>
+    <div class="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+      <h2 class="text-xl font-bold">
+        👥 Все преподаватели
+        <span class="text-sm font-normal text-slate-500">— {{ '{:,}'.format(browse_total).replace(',', ' ') }}</span>
+      </h2>
+      <form method="get" action="/" class="flex items-center gap-2 text-sm">
+        {% if campus_id %}<input type="hidden" name="campus_id" value="{{ campus_id }}">{% endif %}
+        {% if faculty %}<input type="hidden" name="faculty" value="{{ faculty }}">{% endif %}
+        {% if browse_has_publications %}<input type="hidden" name="has_publications" value="{{ browse_has_publications }}">{% endif %}
+        <label class="text-slate-500">Сортировка:</label>
+        <select name="ordering" onchange="this.form.submit()" class="px-2 py-1 rounded border border-slate-300 bg-white">
+          {% for value, label in browse_order_options %}
+            <option value="{{ value }}" {% if value == browse_ordering %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+
+    {% if not browse_results %}
+      <p class="text-slate-500 italic">Никого не нашли с заданными фильтрами.</p>
+    {% else %}
+      <div class="grid md:grid-cols-2 gap-3">
+        {% for p in browse_results %}
+        <a href="/persons/{{ p.person_id }}" class="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex gap-3 hover:shadow-md hover:border-indigo-300 transition">
+          {% if p.avatar %}
+            <img src="{{ p.avatar }}" class="w-14 h-14 rounded-lg object-cover flex-shrink-0">
+          {% else %}
+            <div class="w-14 h-14 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-xl flex-shrink-0">👤</div>
+          {% endif %}
+          <div class="flex-1 min-w-0">
+            <p class="font-semibold text-slate-900 truncate">{{ p.full_name }}</p>
+            <p class="text-xs text-slate-500 truncate">{{ p.primary_unit or '—' }}{% if p.campus_name %} · {{ p.campus_name }}{% endif %}</p>
+            <p class="text-xs text-slate-400 mt-1">Публикаций: {{ p.publications_total or 0 }}</p>
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+
+      {% if browse_total_pages > 1 %}
+      <nav class="flex items-center justify-center gap-1 text-sm mt-6">
+        {% if browse_page > 1 %}
+          <a href="{{ browse_pagination_url(browse_page - 1) }}" class="px-3 py-1 rounded border bg-white hover:bg-slate-50">← Назад</a>
+        {% endif %}
+        <span class="px-3 py-1 text-slate-500">Страница {{ browse_page }} из {{ browse_total_pages }}</span>
+        {% if browse_page < browse_total_pages %}
+          <a href="{{ browse_pagination_url(browse_page + 1) }}" class="px-3 py-1 rounded border bg-white hover:bg-slate-50">Вперёд →</a>
+        {% endif %}
+      </nav>
+      {% endif %}
+    {% endif %}
+  </section>
 {% elif q|length < 2 %}
   <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4">
     Введите хотя бы 2 символа.
   </div>
 {% else %}
 
-  {# === Section 1: Experts === #}
+  {# === Reusable section macros (order depends on is_name_query) === #}
+
   {% macro experts_pagination() %}
     {% if exp_page > 1 or exp_has_next %}
     <nav class="flex items-center justify-center gap-1 text-sm mt-4">
@@ -68,15 +123,17 @@
     </nav>
     {% endif %}
   {% endmacro %}
+
+  {% macro section_experts(title, secondary=False) %}
   <section id="experts" class="mb-10 scroll-mt-16">
-    <h2 class="text-xl font-bold mb-3">🎯 Эксперты по теме <span class="text-sm font-normal text-slate-500">— стр. {{ exp_page }}</span></h2>
+    <h2 class="text-xl font-bold mb-3">{{ title|safe }}{% if not secondary %} <span class="text-sm font-normal text-slate-500">— стр. {{ exp_page }}</span>{% endif %}</h2>
     {% if experts_error %}
       <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4">
         Не удалось получить данные: {{ experts_error }}
       </div>
     {% elif not experts %}
-      <p class="text-slate-500 italic">Никого не нашли на этой странице.</p>
-      {{ experts_pagination() }}
+      <p class="text-slate-500 italic">Никого не нашли{% if not secondary %} на этой странице{% endif %}.</p>
+      {% if not secondary %}{{ experts_pagination() }}{% endif %}
     {% else %}
       <div class="space-y-3">
         {% for hit in experts %}
@@ -115,12 +172,38 @@
         </div>
         {% endfor %}
       </div>
-
-      {{ experts_pagination() }}
+      {% if not secondary %}{{ experts_pagination() }}{% endif %}
     {% endif %}
   </section>
+  {% endmacro %}
 
-  {# === Section 2: Publications (vector) === #}
+  {% macro section_persons(title, large=False) %}
+  <section class="mb-10">
+    <h2 class="text-xl font-bold mb-3">{{ title|safe }}</h2>
+    {% if not persons %}
+      <p class="text-slate-500 italic">Никого не нашли.</p>
+    {% else %}
+      <div class="{% if large %}space-y-3{% else %}grid md:grid-cols-2 gap-3{% endif %}">
+        {% for p in persons %}
+        <a href="/persons/{{ p.person_id }}" class="bg-white rounded-lg shadow-sm border border-slate-200 {% if large %}p-3 sm:p-4{% else %}p-3{% endif %} flex gap-3 hover:shadow-md hover:border-indigo-300 transition">
+          {% if p.avatar %}
+            <img src="{{ p.avatar }}" class="{% if large %}w-16 h-16 sm:w-20 sm:h-20{% else %}w-14 h-14{% endif %} rounded-lg object-cover flex-shrink-0">
+          {% else %}
+            <div class="{% if large %}w-16 h-16 sm:w-20 sm:h-20{% else %}w-14 h-14{% endif %} rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-xl flex-shrink-0">👤</div>
+          {% endif %}
+          <div class="flex-1 min-w-0">
+            <p class="font-semibold text-slate-900 truncate{% if large %} text-lg text-indigo-700{% endif %}">{{ p.full_name }}</p>
+            <p class="text-xs text-slate-500 truncate">{{ p.primary_unit or '—' }}{% if p.campus_name %} · {{ p.campus_name }}{% endif %}</p>
+            <p class="text-xs text-slate-400 mt-1">Публикаций: {{ p.publications_total or 0 }}</p>
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+  {% endmacro %}
+
+  {% macro section_publications() %}
   <section class="mb-10">
     <h2 class="text-xl font-bold mb-1">📚 Публикации <span class="text-sm font-normal text-slate-500">— семантический поиск по смыслу</span></h2>
     <p class="text-xs text-slate-400 mb-3">Топ-5 ближайших по cosine. Точный поиск по подстроке: <a href="/publications?q={{ q|urlencode }}" class="underline hover:text-indigo-600">/publications →</a></p>
@@ -158,8 +241,9 @@
       </div>
     {% endif %}
   </section>
+  {% endmacro %}
 
-  {# === Section 3: Courses === #}
+  {% macro section_courses() %}
   <section class="mb-10">
     <h2 class="text-xl font-bold mb-3">🎓 Курсы</h2>
     {% if not courses %}
@@ -183,31 +267,20 @@
       </div>
     {% endif %}
   </section>
+  {% endmacro %}
 
-  {# === Section 4: Persons === #}
-  <section class="mb-10">
-    <h2 class="text-xl font-bold mb-3">👥 Преподаватели по фамилии</h2>
-    {% if not persons %}
-      <p class="text-slate-500 italic">Никого не нашли.</p>
-    {% else %}
-      <div class="grid md:grid-cols-2 gap-3">
-        {% for p in persons %}
-        <a href="/persons/{{ p.person_id }}" class="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex gap-3 hover:shadow-md hover:border-indigo-300 transition">
-          {% if p.avatar %}
-            <img src="{{ p.avatar }}" class="w-14 h-14 rounded-lg object-cover flex-shrink-0">
-          {% else %}
-            <div class="w-14 h-14 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-xl flex-shrink-0">👤</div>
-          {% endif %}
-          <div class="flex-1 min-w-0">
-            <p class="font-semibold text-slate-900 truncate">{{ p.full_name }}</p>
-            <p class="text-xs text-slate-500 truncate">{{ p.primary_unit or '—' }}</p>
-            <p class="text-xs text-slate-400 mt-1">Публикаций: {{ p.publications_total or 0 }}</p>
-          </div>
-        </a>
-        {% endfor %}
-      </div>
+  {# === Layout: name-query promotes the persons section, hides publications/courses === #}
+  {% if is_name_query %}
+    {{ section_persons("👤 Преподаватели по фамилии", large=True) }}
+    {% if experts %}
+      {{ section_experts("🔍 Возможно, по теме", secondary=True) }}
     {% endif %}
-  </section>
+  {% else %}
+    {{ section_experts("🎯 Эксперты по теме") }}
+    {{ section_publications() }}
+    {{ section_courses() }}
+    {{ section_persons("👥 Также нашли по фамилии") }}
+  {% endif %}
 
 {% endif %}
 {% endblock %}

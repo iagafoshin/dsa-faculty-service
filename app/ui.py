@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -28,6 +29,7 @@ from app.routes import _attach_authors  # shared dict[str, list[AuthorRef]] buil
 from app.schemas import AuthorRef, ScrapeStatus
 from app.scraper.crawler import crawl_and_ingest
 from app.vector_search import (
+    TEACHER_FILTER_SQL,
     compute_matched_topics,
     vector_search_persons,
     vector_search_publications,
@@ -60,22 +62,43 @@ def _score_tier(score: float) -> tuple[str, str] | None:
     return None
 
 
+# Определение «запрос похож на ФИО»: 1-3 слова, каждое начинается с заглавной
+# кириллицы (Иванов / Иванов И П / Кузнецов Сергей Олегович). Инициалы (1 буква)
+# тоже считаем словом. Английские буквы и lowercase → topic-запрос, даже если он
+# короткий («квантовая физика», «llm для финансов»).
+_NAME_TOKEN_RE = re.compile(r"^[А-ЯЁ][а-яё]+\.?$|^[А-ЯЁ]\.?$")
+
+
+def looks_like_name_query(q: str) -> bool:
+    words = (q or "").strip().split()
+    if not (1 <= len(words) <= 3):
+        return False
+    return all(_NAME_TOKEN_RE.fullmatch(w) for w in words)
+
+
 async def _list_campuses(db: AsyncSession) -> list[dict[str, str]]:
     rows = (await db.execute(select(Campus).order_by(Campus.campus_name))).scalars().all()
     return [{"campus_id": r.campus_id, "campus_name": r.campus_name} for r in rows]
 
 
-async def _list_units(db: AsyncSession) -> list[str]:
-    """Уникальные значения primary_unit (для datalist-автокомплита).
+_UNIT_MIN_PERSONS = 30  # порог для datalist — мелочь типа «лаборатория …» только шумит
 
-    Берём только те подразделения, где есть хотя бы один enriched-эксперт —
-    подсказывать факультеты без векторного поиска бессмысленно.
+
+async def _list_units(db: AsyncSession) -> list[str]:
+    """Крупные `primary_unit` для datalist-автокомплита.
+
+    Только подразделения с >= _UNIT_MIN_PERSONS эмбедденных преподов —
+    это ~17 ключевых факультетов/институтов. Мелкие лаборатории, базовые
+    кафедры РАН и центры (20-30 человек на каждый, десятки штук) только
+    раздували datalist и студент в них не ориентируется. Свободный ввод
+    в input всё равно работает — datalist это подсказки, не whitelist.
     """
     rows = (await db.execute(
         select(Person.primary_unit, func.count())
         .where(Person.primary_unit.is_not(None))
         .where(Person.embedding.is_not(None))
         .group_by(Person.primary_unit)
+        .having(func.count() >= _UNIT_MIN_PERSONS)
         .order_by(func.count().desc(), Person.primary_unit.asc())
     )).all()
     return [u for u, _ in rows]
@@ -115,6 +138,15 @@ _EXAMPLE_QUERIES = [
 ]
 
 
+_BROWSE_ORDER = {
+    "full_name": (Person.full_name.asc(), "имя ↑"),
+    "-full_name": (Person.full_name.desc(), "имя ↓"),
+    "publications_total": (Person.publications_total.asc(), "публикаций ↑"),
+    "-publications_total": (Person.publications_total.desc(), "публикаций ↓"),
+}
+_BROWSE_PAGE_SIZE = 20
+
+
 @router.get("/", response_class=HTMLResponse)
 async def home(
     request: Request,
@@ -122,9 +154,14 @@ async def home(
     campus_id: str | None = None,
     faculty: str | None = None,
     exp_page: int = Query(1, ge=1, le=_EXP_MAX_PAGE),
+    # Browse-mode параметры (когда q пустой — листаем всех преподов).
+    page: int = Query(1, ge=1),
+    ordering: str = "-publications_total",
+    has_publications: str | None = None,
     db: AsyncSession = Depends(get_session),
 ):
     faculty = (faculty or "").strip()
+    is_name_query = looks_like_name_query(q or "")
 
     def exp_page_url(new_page: int) -> str:
         params: dict[str, Any] = {"exp_page": new_page}
@@ -138,6 +175,7 @@ async def home(
         "q": q,
         "campus_id": campus_id,
         "faculty": faculty,
+        "is_name_query": is_name_query,
         "campuses": await _list_campuses(db),
         "units": await _list_units(db),
         "experts": [],
@@ -151,9 +189,61 @@ async def home(
         "courses": [],
         "persons": [],
         "example_queries": _EXAMPLE_QUERIES,
+        # Browse-mode (заполнится ниже если q пустой)
+        "browse_results": [],
+        "browse_total": 0,
+        "browse_page": page,
+        "browse_total_pages": 1,
+        "browse_ordering": ordering,
+        "browse_has_publications": has_publications,
+        "browse_order_options": [(k, label) for k, (_, label) in _BROWSE_ORDER.items()],
+        "browse_pagination_url": lambda _p: "/",
     }
 
-    if q and len(q) >= 2:
+    if not q:
+        # === Browse mode: листаем всех преподов (бывший /persons) ===
+        base = (
+            select(Person, Campus.campus_name)
+            .outerjoin(Campus, Person.campus_id == Campus.campus_id)
+            .where(TEACHER_FILTER_SQL)
+        )
+        if campus_id:
+            base = base.where(Person.campus_id == campus_id)
+        if faculty:
+            base = base.where(Person.primary_unit.ilike(f"%{faculty}%"))
+        if has_publications == "true":
+            base = base.where(Person.publications_total > 0)
+        elif has_publications == "false":
+            base = base.where(Person.publications_total == 0)
+
+        total = (await db.execute(
+            select(func.count()).select_from(base.order_by(None).subquery())
+        )).scalar_one()
+        ctx["browse_total"] = total
+        ctx["browse_total_pages"] = max(1, (total + _BROWSE_PAGE_SIZE - 1) // _BROWSE_PAGE_SIZE)
+
+        order_expr = _BROWSE_ORDER.get(ordering, _BROWSE_ORDER["-publications_total"])[0]
+        base = base.order_by(order_expr, Person.person_id.asc())
+        base = base.limit(_BROWSE_PAGE_SIZE).offset((page - 1) * _BROWSE_PAGE_SIZE)
+        for person, c_name in (await db.execute(base)).all():
+            ctx["browse_results"].append({
+                "person_id": person.person_id,
+                "full_name": person.full_name,
+                "avatar": person.avatar,
+                "primary_unit": person.primary_unit,
+                "publications_total": person.publications_total,
+                "campus_name": c_name,
+            })
+
+        def browse_pagination_url(new_page: int) -> str:
+            params: dict[str, Any] = {"page": new_page, "ordering": ordering}
+            if campus_id: params["campus_id"] = campus_id
+            if faculty: params["faculty"] = faculty
+            if has_publications: params["has_publications"] = has_publications
+            return "/?" + urlencode(params)
+        ctx["browse_pagination_url"] = browse_pagination_url
+
+    elif q and len(q) >= 2:
         like = f"%{q}%"
 
         # === Experts (vector) с пагинацией ===
@@ -248,17 +338,23 @@ async def home(
                 "person_unit": p.primary_unit,
             })
 
-        # Persons (ILIKE)
+        # Persons (ILIKE по ФИО) — только преподаватели, как и vector
+        # При name-режиме поднимаем лимит до 10 (юзер ищет конкретного человека —
+        # помогаем найти даже одного из десятков «Ивановых»).
+        per_limit = 10 if is_name_query else 5
         per_q = (
             select(Person, Campus.campus_name)
             .outerjoin(Campus, Person.campus_id == Campus.campus_id)
             .where(Person.full_name.ilike(like))
+            .where(TEACHER_FILTER_SQL)
         )
         if campus_id:
             per_q = per_q.where(Person.campus_id == campus_id)
         if faculty:
             per_q = per_q.where(Person.primary_unit.ilike(f"%{faculty}%"))
-        per_q = per_q.order_by(Person.publications_total.desc().nullslast(), Person.full_name.asc()).limit(5)
+        per_q = per_q.order_by(
+            Person.publications_total.desc().nullslast(), Person.full_name.asc()
+        ).limit(per_limit)
         for person, c_name in (await db.execute(per_q)).all():
             ctx["persons"].append({
                 "person_id": person.person_id,
@@ -272,71 +368,24 @@ async def home(
     return templates.TemplateResponse(request, "home.html", ctx)
 
 
-# === GET /persons (list) ===
+# === GET /persons → 301 на новую главную (browse-режим теперь там) ===
 
-@router.get("/persons", response_class=HTMLResponse)
-async def persons_list(
-    request: Request,
+@router.get("/persons")
+async def persons_list_redirect(
     q: str | None = None,
     campus_id: str | None = None,
     has_publications: str | None = None,
-    ordering: str = "-publications_total",
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_session),
+    ordering: str | None = None,
+    page: int | None = None,
 ):
-    _ORDER = {
-        "full_name": Person.full_name.asc(),
-        "-full_name": Person.full_name.desc(),
-        "publications_total": Person.publications_total.asc(),
-        "-publications_total": Person.publications_total.desc(),
-    }
-
-    base = select(Person, Campus.campus_name).outerjoin(Campus, Person.campus_id == Campus.campus_id)
-    filters = []
-    if q:
-        filters.append(Person.full_name.ilike(f"%{q}%"))
-    if campus_id:
-        filters.append(Person.campus_id == campus_id)
-    if has_publications == "true":
-        filters.append(Person.publications_total > 0)
-    elif has_publications == "false":
-        filters.append(Person.publications_total == 0)
-    if filters:
-        base = base.where(and_(*filters))
-
-    total = (await db.execute(
-        select(func.count()).select_from(base.order_by(None).subquery())
-    )).scalar_one()
-    total_pages = max(1, (total + page_size - 1) // page_size)
-
-    order_expr = _ORDER.get(ordering, Person.publications_total.desc())
-    base = base.order_by(order_expr, Person.person_id.asc()).limit(page_size).offset((page - 1) * page_size)
-    rows = (await db.execute(base)).all()
-
-    results = [{
-        "person_id": p.person_id,
-        "full_name": p.full_name,
-        "avatar": p.avatar,
-        "primary_unit": p.primary_unit,
-        "publications_total": p.publications_total,
-        "languages": p.languages or [],
-        "campus_name": c_name,
-    } for p, c_name in rows]
-
-    def pagination_url(new_page: int) -> str:
-        params = {"page": new_page, "page_size": page_size, "ordering": ordering}
-        if q: params["q"] = q
-        if campus_id: params["campus_id"] = campus_id
-        if has_publications: params["has_publications"] = has_publications
-        return "/persons?" + urlencode(params)
-
-    return templates.TemplateResponse(request, "persons.html", {
-        "q": q, "campus_id": campus_id, "has_publications": has_publications,
-        "ordering": ordering, "page": page, "total": total, "total_pages": total_pages,
-        "results": results, "campuses": await _list_campuses(db),
-        "pagination_url": pagination_url,
-    })
+    params: dict[str, Any] = {}
+    if q: params["q"] = q
+    if campus_id: params["campus_id"] = campus_id
+    if has_publications: params["has_publications"] = has_publications
+    if ordering: params["ordering"] = ordering
+    if page: params["page"] = page
+    target = "/" + ("?" + urlencode(params) if params else "")
+    return RedirectResponse(target, status_code=301)
 
 
 # === GET /publications (list) ===

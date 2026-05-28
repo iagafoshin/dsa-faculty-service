@@ -24,7 +24,7 @@ TEACHER_TITLE_RE = (
     r"научный сотрудник|научный руководител|"
     r"академическ\w+ руководител|заведующий кафедр)"
 )
-_TEACHER_FILTER_SQL = text(
+TEACHER_FILTER_SQL = text(
     "EXISTS ("
     " SELECT 1 FROM jsonb_array_elements(persons.positions) p"
     " WHERE lower(p->>'title') ~ :teacher_re"
@@ -61,7 +61,7 @@ async def vector_search_persons(
         )
         .outerjoin(Campus, Person.campus_id == Campus.campus_id)
         .where(Person.embedding.is_not(None))
-        .where(_TEACHER_FILTER_SQL)
+        .where(TEACHER_FILTER_SQL)
     )
     if campus_id:
         stmt = stmt.where(Person.campus_id == campus_id)
