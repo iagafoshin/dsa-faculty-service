@@ -20,6 +20,7 @@ import torch
 from keybert import KeyBERT
 from sentence_transformers import SentenceTransformer
 
+from app.nlp.lemmatize import normalize_phrase
 from app.nlp.stopwords import EN_STOPWORDS, JUNK_PHRASES, ORG_INDICATORS, RU_STOPWORDS
 
 logger = logging.getLogger(__name__)
@@ -120,6 +121,9 @@ _WHITESPACE_RE = re.compile(r"\s+")
 def _normalize(tag: str) -> str:
     tag = tag.lower().strip()
     tag = tag.strip(_STRIP_CHARS)
+    # ё → е для устойчивого матчинга со стоп-фразами (pymorphy склонен
+    # возвращать «приглашённый», а HSE в большинстве мест пишет «е»).
+    tag = tag.replace("ё", "е")
     tag = _WHITESPACE_RE.sub(" ", tag).strip()
     return tag
 
@@ -175,6 +179,13 @@ _GG_RE = re.compile(r"\bгг?\.?\b", re.IGNORECASE)
 # биографий или дат событий.
 _LEADING_YEAR_RE = re.compile(r"^(?:19|20)\d{2}\b")
 
+# «Стаж N лет/год/года/месяцев» — десятки одинаковых записей в HSE-биографиях.
+_TENURE_RE = re.compile(r"^стаж\s*\d", re.IGNORECASE)
+
+# Теги, начинающиеся с «интересы …» — это сам заголовок секции,
+# KeyBERT тянет его как ключевую фразу.
+_INTERESTS_PREFIX_RE = re.compile(r"^интерес[ыа]?\s+", re.IGNORECASE)
+
 
 def _contains_org_indicator(tag: str) -> bool:
     """Substring-проверка против ORG_INDICATORS. Для очень коротких токенов
@@ -225,6 +236,26 @@ def apply_filters(
         if not tag:
             continue
 
+        # Лемматизация в им.п. — делаем РАНЬШЕ всех фильтров, чтобы стоп-слова
+        # и JUNK_PHRASES матчили нормализованные формы («стаж года» → «стаж год»
+        # → стоп; «эволюционной разработки» → «эволюционная разработка»).
+        tag = normalize_phrase(tag)
+        # _normalize ещё раз: подровнять пробелы, заменить ё→е, убрать
+        # хвостовые знаки (нормализация фразы могла оставить «- » вокруг дефиса).
+        tag = _normalize(tag)
+        # Схлопнуть «слово - слово» обратно в «слово-слово» (после лемматизации
+        # pymorphy3 ставит пробелы вокруг дефиса).
+        tag = re.sub(r"\s*-\s*", "-", tag)
+
+        # Шаблоны-паразиты по регэкспам (более прицельные, чем JUNK_PHRASES)
+        if _TENURE_RE.match(tag):
+            continue
+        if _INTERESTS_PREFIX_RE.match(tag):
+            # Берём то, что после «интересы » — это и есть фактический интерес.
+            tag = _INTERESTS_PREFIX_RE.sub("", tag, count=1).strip()
+            if not tag:
+                continue
+
         # (2) имя/фамилия персоны
         if any(nt in tag for nt in name_tokens):
             continue
@@ -273,7 +304,8 @@ def apply_filters(
 
         keep.append(tag)
 
-    # (8) дедуп по подстроке — длинный поглощает короткий
+    # (8) дедуп по подстроке — длинный поглощает короткий. После лемматизации
+    # это особенно важно: «машинное обучение» и «обучение машинное» сольются.
     return _dedupe_substrings(keep)
 
 
