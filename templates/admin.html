@@ -16,42 +16,19 @@
 </div>
 {% endif %}
 
-<form method="post" action="/admin/scrape" class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-8">
+<form method="post" action="/admin/scrape" class="bg-white rounded border border-slate-200 p-4 mb-8">
   <h2 class="font-semibold mb-3">Запустить новый джоб</h2>
 
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-    <div>
-      <label class="text-xs text-slate-500 block mb-1">Кампусы (зажми Ctrl/⌘ для нескольких)</label>
-      <select name="campus_ids" multiple size="4"
-              class="w-full px-2 py-1 rounded border border-slate-300 bg-white text-sm">
-        {% for c in campuses %}<option value="{{ c.campus_id }}">{{ c.campus_name }}</option>{% endfor %}
-      </select>
-      <p class="text-[10px] text-slate-400 mt-1">Пусто = все кампусы</p>
-    </div>
-
-    <div>
-      <label class="text-xs text-slate-500 block mb-1">Буквы фамилии (через запятую)</label>
-      <input type="text" name="letters" placeholder="например: А,Б,В"
-             class="w-full px-3 py-2 rounded border border-slate-300">
-      <p class="text-[10px] text-slate-400 mt-1">Доступные: {{ letters|join(', ') }}</p>
-      <p class="text-[10px] text-slate-400">Пусто = все буквы</p>
-    </div>
-
-    <div>
+  <div class="flex flex-col sm:flex-row sm:items-end gap-3">
+    <div class="flex-1">
       <label class="text-xs text-slate-500 block mb-1">Лимит профилей</label>
       <input type="number" name="limit" min="1" max="50000" placeholder="например: 100"
              class="w-full px-3 py-2 rounded border border-slate-300">
-      <p class="text-[10px] text-slate-400 mt-1">Пусто = без лимита (вся HSE ≈ 12k)</p>
+      <p class="text-[10px] text-slate-400 mt-1">Пусто = без лимита (вся HSE ≈ 12k, ~45 мин).</p>
     </div>
-  </div>
-
-  <div class="mt-4 flex items-center gap-3">
-    <button type="submit" class="px-4 py-2 bg-ink-600 text-white rounded hover:bg-ink-900">
+    <button type="submit" class="px-4 py-2 bg-ink-900 text-white rounded hover:bg-ink-800 whitespace-nowrap">
       Запустить
     </button>
-    <span class="text-xs text-slate-500">
-      Совет: для теста — 5 профилей, 1 буква, 1 кампус.
-    </span>
   </div>
 </form>
 

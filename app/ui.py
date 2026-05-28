@@ -740,7 +740,6 @@ async def person_profile(
 # из HTML-формы). Для прод-деплоя закрывайте /admin через reverse-proxy
 # (basic-auth, IP-allowlist и т.п.) либо просто не открывайте порт UI наружу.
 
-ADMIN_LETTERS = list("АБВГДЕЖЗИКЛМНОПРСТУФХЦЧШЩЭЮЯ")
 ADMIN_RUNNING_STATUSES = {
     ScrapeStatus.queued.value,
     ScrapeStatus.running.value,
@@ -760,8 +759,6 @@ async def admin_dashboard(
         select(ScrapeJob).order_by(ScrapeJob.started_at.desc()).limit(20)
     )).scalars().all()
     return templates.TemplateResponse(request, "admin.html", {
-        "campuses": await _list_campuses(db),
-        "letters": ADMIN_LETTERS,
         "jobs": rows,
         "running_statuses": ADMIN_RUNNING_STATUSES,
         "schedule_info": get_schedule_info(),
@@ -771,15 +768,10 @@ async def admin_dashboard(
 @router.post("/admin/scrape", response_class=HTMLResponse)
 async def admin_scrape_start(
     background: BackgroundTasks,
-    campus_ids: list[str] | None = Form(default=None),
-    letters: str = Form(default=""),
     limit: str = Form(default=""),
     _: str = Depends(require_admin_basic),
     db: AsyncSession = Depends(get_session),
 ):
-    # Параметры из формы — нормализуем
-    campus_ids_clean = [c for c in (campus_ids or []) if c.strip()] or None
-    letters_clean = [c.strip() for c in letters.split(",") if c.strip()] or None
     try:
         limit_i: int | None = int(limit) if limit.strip() else None
     except ValueError:
@@ -790,7 +782,7 @@ async def admin_scrape_start(
         job_id=job_id,
         status=ScrapeStatus.queued.value,
         limit_count=limit_i,
-        campus_id=",".join(campus_ids_clean) if campus_ids_clean else None,
+        campus_id=None,
         processed=0,
         total=None,
         started_at=datetime.now(timezone.utc),
@@ -800,7 +792,7 @@ async def admin_scrape_start(
 
     background.add_task(
         crawl_and_ingest,
-        limit_i, campus_ids_clean, letters_clean, job_id, AsyncSessionLocal,
+        limit_i, None, None, job_id, AsyncSessionLocal,
     )
     # 303 See Other — после POST уводит на GET страницы джоба
     return RedirectResponse(f"/admin/scrape/{job_id}", status_code=303)
