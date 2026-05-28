@@ -29,9 +29,12 @@ from app.nlp.person_context import build_person_context, build_publication_conte
 logger = logging.getLogger(__name__)
 
 # Минимальная длина текста контекста персоны для запуска NER+embedding.
-# Меньше — это профили без публикаций / с пустыми био / 1-2 строки и
-# теги/эмбеддинг будут шумом ("начал работать", "году").
-PERSON_MIN_CONTEXT_LEN = 500
+# 250 — компромисс после того, как мы убрали bio/work_experience/abstracts:
+# у части профилей теперь меньше текста, и порог 500 отрезал ~1600 человек.
+# При 250 эмбедятся «лёгкие» профили (преподаватель с 3-5 интересами +
+# короткими названиями курсов) — лучше скромный сигнал, чем NULL embedding,
+# когда человек просто не появляется в поиске.
+PERSON_MIN_CONTEXT_LEN = 250
 
 
 async def _fetch_pubs_for_persons(

@@ -70,13 +70,18 @@ def build_person_context(
     """
     parts: list[str] = [person.full_name]
 
+    # БЕЗ хедеров типа «Подразделение:» / «Интересы:» / «Темы ВКР:» — KeyBERT
+    # обожает хватать заголовки разделов как ключевые фразы («подразделение
+    # креативных индустрий интересы» — реальный пример из top-тегов до фикса).
+    # Подаём чистые значения как самостоятельные строки.
+
     topical_unit = _topical_unit(person.primary_unit)
     if topical_unit:
-        parts.append("Подразделение: " + topical_unit)
+        parts.append(topical_unit)
 
     interests = _take_lines(person.interests)
     if interests:
-        parts.append("Интересы: " + "; ".join(interests))
+        parts.append("; ".join(interests))
 
     # Темы ВКР — высочайший по релевантности студентскому домену сигнал
     # (студенты ищут научрука именно под такие формулировки). Берём до 50
@@ -90,7 +95,7 @@ def build_person_context(
                 seen_t.add(title)
                 thesis_titles.append(title)
         if thesis_titles:
-            parts.append("Темы ВКР: " + "; ".join(thesis_titles))
+            parts.append("; ".join(thesis_titles))
 
     pub_lines: list[str] = []
     for pub in publications[:30]:
