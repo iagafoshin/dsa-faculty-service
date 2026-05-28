@@ -1,11 +1,37 @@
 """Сборка текстового контекста персоны/публикации для NER+embedding."""
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable
 
 from app.models import Course, Person, Publication, Thesis
 
 _MAX_PERSON_CTX = 5000
+
+# Срез институциональной шапки в primary_unit — оставляем тематический хвост.
+# «Факультет компьютерных наук» → «компьютерных наук». KeyBERT всё равно
+# отсеет теги со словом «факультет/институт/...» через ORG_INDICATORS, но
+# для embedding-сигнала хвост даёт реальный тематический буст у людей со
+# слабыми interests.
+_UNIT_PREFIX_RE = re.compile(
+    r"^(?:факультет|институт|школа|кафедра|департамент|центр|лаборатори[яи]|"
+    r"высшая\s+школа|международный\s+институт|московский\s+институт|лицей)\s+",
+    re.IGNORECASE,
+)
+_UNIT_TRAILING_NAMED_RE = re.compile(
+    r"\s+им(?:ени)?\.?\s+(?:[А-ЯЁ]\.\s*)?(?:[А-ЯЁ]\.\s*)?[А-ЯЁ][а-яё]+\S*$",
+)
+_UNIT_IGNORE_AFTER_STRIP = {"ниу вшэ", "вшэ", "ниу", ""}
+
+
+def _topical_unit(primary_unit: str | None) -> str:
+    if not primary_unit:
+        return ""
+    text = _UNIT_PREFIX_RE.sub("", primary_unit.strip())
+    text = _UNIT_TRAILING_NAMED_RE.sub("", text).strip()
+    if text.lower() in _UNIT_IGNORE_AFTER_STRIP:
+        return ""
+    return text
 
 
 def _take_lines(items: Iterable[Any], limit: int | None = None) -> list[str]:
@@ -43,6 +69,10 @@ def build_person_context(
     плотные «студенто-релевантные» темы.
     """
     parts: list[str] = [person.full_name]
+
+    topical_unit = _topical_unit(person.primary_unit)
+    if topical_unit:
+        parts.append("Подразделение: " + topical_unit)
 
     interests = _take_lines(person.interests)
     if interests:
