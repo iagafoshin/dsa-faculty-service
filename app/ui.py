@@ -144,6 +144,38 @@ _EXAMPLE_QUERIES = [
 ]
 
 
+async def _fetch_card_stats(
+    db: AsyncSession, person_ids: list[int],
+) -> dict[int, dict[str, int]]:
+    """Уникальные курсы + ВКР по списку person_id — одним батчем.
+
+    Для карточек на главной: видеть «Публикаций · Курсов · ВКР» в одну
+    строку. БД-агрегат вместо N+1, индексы по person_id уже есть.
+    """
+    if not person_ids:
+        return {}
+    out: dict[int, dict[str, int]] = {pid: {"courses": 0, "theses": 0} for pid in person_ids}
+
+    from app.models import Course, ThesisSupervisor
+    course_rows = (await db.execute(
+        select(Course.person_id, func.count(func.distinct(Course.title)))
+        .where(Course.person_id.in_(person_ids))
+        .group_by(Course.person_id)
+    )).all()
+    for pid, n in course_rows:
+        out[pid]["courses"] = int(n)
+
+    thesis_rows = (await db.execute(
+        select(ThesisSupervisor.person_id, func.count())
+        .where(ThesisSupervisor.person_id.in_(person_ids))
+        .group_by(ThesisSupervisor.person_id)
+    )).all()
+    for pid, n in thesis_rows:
+        out[pid]["theses"] = int(n)
+
+    return out
+
+
 def _extra_units(person: Person) -> list[str]:
     """Все уникальные имена `positions[].units[].name`, кроме primary_unit.
 
@@ -251,7 +283,10 @@ async def home(
         order_expr = _BROWSE_ORDER.get(ordering, _BROWSE_ORDER["-publications_total"])[0]
         base = base.order_by(order_expr, Person.person_id.asc())
         base = base.limit(_BROWSE_PAGE_SIZE).offset((page - 1) * _BROWSE_PAGE_SIZE)
-        for person, c_name in (await db.execute(base)).all():
+        rows = (await db.execute(base)).all()
+        stats = await _fetch_card_stats(db, [p.person_id for p, _ in rows])
+        for person, c_name in rows:
+            s = stats.get(person.person_id, {"courses": 0, "theses": 0})
             ctx["browse_results"].append({
                 "person_id": person.person_id,
                 "full_name": person.full_name,
@@ -259,6 +294,8 @@ async def home(
                 "primary_unit": person.primary_unit,
                 "extra_units": _extra_units(person),
                 "publications_total": person.publications_total,
+                "courses_count": s["courses"],
+                "theses_count": s["theses"],
                 "campus_name": c_name,
             })
 
@@ -286,11 +323,13 @@ async def home(
                 len(exp_rows) > _EXP_PAGE_SIZE and exp_page < _EXP_MAX_PAGE
             )
             exp_rows = exp_rows[:_EXP_PAGE_SIZE]
+            exp_stats = await _fetch_card_stats(db, [p.person_id for p, _, _ in exp_rows])
             experts_list: list[dict[str, Any]] = []
             for person, c_name, score in exp_rows:
                 tier = _score_tier(float(score))
                 if tier is None:
                     continue  # шум — не показываем
+                es = exp_stats.get(person.person_id, {"courses": 0, "theses": 0})
                 experts_list.append({
                     "person_id": person.person_id,
                     "full_name": person.full_name,
@@ -299,6 +338,9 @@ async def home(
                     "primary_unit": person.primary_unit,
                     "extra_units": _extra_units(person),
                     "campus_name": c_name,
+                    "publications_total": person.publications_total,
+                    "courses_count": es["courses"],
+                    "theses_count": es["theses"],
                     "score": float(score),
                     "tier_label": tier[0],
                     "tier_class": tier[1],
@@ -383,7 +425,10 @@ async def home(
         per_q = per_q.order_by(
             Person.publications_total.desc().nullslast(), Person.full_name.asc()
         ).limit(per_limit)
-        for person, c_name in (await db.execute(per_q)).all():
+        per_rows = (await db.execute(per_q)).all()
+        per_stats = await _fetch_card_stats(db, [p.person_id for p, _ in per_rows])
+        for person, c_name in per_rows:
+            ps = per_stats.get(person.person_id, {"courses": 0, "theses": 0})
             ctx["persons"].append({
                 "person_id": person.person_id,
                 "full_name": person.full_name,
@@ -391,6 +436,8 @@ async def home(
                 "primary_unit": person.primary_unit,
                 "extra_units": _extra_units(person),
                 "publications_total": person.publications_total,
+                "courses_count": ps["courses"],
+                "theses_count": ps["theses"],
                 "campus_name": c_name,
             })
 
@@ -427,7 +474,6 @@ async def publications_list(
     year_to: str | None = None,
     type: str | None = None,
     ordering: str = "-created_at",
-    semantic: str | None = None,  # checkbox: "on" если включён vector mode
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_session),
@@ -443,7 +489,11 @@ async def publications_list(
     year_from_i = _to_int(year_from)
     year_to_i = _to_int(year_to)
     type = (type or "").strip() or None
-    is_semantic = bool(semantic) and bool(q) and len(q) >= 2
+    # Если есть запрос — всегда vector mode (фильтры year/type применяются
+    # внутри vector_search_publications). Без запроса — обычная пагинация
+    # по списку с фильтрами. Чекбокс «семантический режим» убран — он
+    # дублировал смысл и путал.
+    is_semantic = bool(q) and len(q) >= 2
 
     _ORDER = {
         "year": Publication.year.asc(),
@@ -511,9 +561,6 @@ async def publications_list(
         if year_from_i is not None: params["year_from"] = year_from_i
         if year_to_i is not None: params["year_to"] = year_to_i
         if type: params["type"] = type
-        # semantic-режим не имеет пагинации, но если активен и юзер всё-таки
-        # формирует URL — флаг прокидываем (на всякий случай).
-        if semantic: params["semantic"] = "on"
         return "/publications?" + urlencode(params)
 
     return templates.TemplateResponse(request, "publications.html", {

@@ -1,36 +1,36 @@
 {% extends "base.html" %}
-{% block title %}Подбор научрука · DSA Faculty{% endblock %}
+{% block title %}Поиск научного руководителя · DSA Faculty{% endblock %}
 
 {% block content %}
-<div class="text-center mb-6 sm:mb-8">
-  <h1 class="text-2xl sm:text-3xl font-bold text-slate-900 mb-2 font-serif">Подбор научного руководителя</h1>
-  <p class="text-sm sm:text-base text-slate-600">Опишите проект — найдём эксперта НИУ ВШЭ, релевантные публикации и преподаваемые курсы.</p>
+<div class="mb-8">
+  <h1 class="display text-3xl sm:text-4xl text-ink-900">Поиск научного руководителя</h1>
+  <p class="text-ink-500 mt-2">Эксперты, темы их ВКР и публикаций — по запросу или фамилии.</p>
 </div>
 
 <form method="get" action="/" class="mb-6 sm:mb-8">
   <div class="flex flex-col sm:flex-row gap-2">
     <input type="text" name="q" value="{{ q or '' }}"
            placeholder="Опишите проект или введите фамилию..."
-           class="flex-1 px-4 py-3 rounded-lg border border-slate-300 focus:border-hse-700 focus:ring-2 focus:ring-hse-200 outline-none text-base"
+           class="flex-1 px-4 py-3 rounded-lg border border-slate-300 focus:border-ink-900 focus:ring-2 focus:ring-ink-200 outline-none text-base"
            autofocus>
-    <button type="submit" class="px-6 py-3 bg-hse-700 text-white font-medium rounded hover:bg-hse-800 whitespace-nowrap">
+    <button type="submit" class="px-6 py-3 bg-ink-900 text-white font-medium rounded hover:bg-ink-800 whitespace-nowrap">
       Найти
     </button>
   </div>
 
-  <div class="grid grid-cols-1 md:grid-cols-5 gap-2 mt-3">
-    <div class="md:col-span-2">
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+    <div>
       <label class="text-xs text-slate-500 block mb-1">Кампус</label>
-      <select name="campus_id" class="w-full px-3 py-2 rounded border border-slate-300 bg-white">
+      <select name="campus_id" class="w-full px-3 py-3 rounded border border-slate-300 bg-white text-base">
         <option value="">Все кампусы</option>
         {% for c in campuses %}<option value="{{ c.campus_id }}" {% if c.campus_id == campus_id %}selected{% endif %}>{{ c.campus_name }}</option>{% endfor %}
       </select>
     </div>
-    <div class="md:col-span-3">
-      <label class="text-xs text-slate-500 block mb-1">Факультет / подразделение</label>
+    <div>
+      <label class="text-xs text-slate-500 block mb-1">Факультет или подразделение</label>
       <input list="units-list" type="text" name="faculty" value="{{ faculty }}"
-             placeholder="выберите или впишите часть названия (например: «компьютерных», «гуманитарных»)"
-             class="w-full px-3 py-2 rounded border border-slate-300">
+             placeholder="например: компьютерных, гуманитарных, права"
+             class="w-full px-3 py-3 rounded border border-slate-300 text-base">
       <datalist id="units-list">
         {% for u in units %}<option value="{{ u }}">{% endfor %}
       </datalist>
@@ -39,8 +39,8 @@
 </form>
 
 {% if not q %}
-  <div class="bg-blue-50 border border-blue-200 text-blue-800 rounded-lg p-4 mb-4">
-    Опишите тему проекта или укажите фамилию преподавателя — и нажмите <b>Найти</b>.
+  <div class="bg-ink-100 border border-ink-200 text-ink-900 rounded p-4 mb-4 text-sm">
+    Опишите тему исследования или укажите фамилию преподавателя и нажмите <b>Найти</b>.
   </div>
   <div class="text-xs text-slate-500 mb-2">Попробуйте, например:</div>
   <div class="flex flex-wrap gap-2 mb-10">
@@ -74,11 +74,11 @@
     {% else %}
       <div class="grid md:grid-cols-2 gap-3">
         {% for p in browse_results %}
-        <a href="/persons/{{ p.person_id }}" class="bg-white rounded border border-slate-200 p-3 flex gap-3 hover:border-hse-700 transition">
+        <a href="/persons/{{ p.person_id }}" class="bg-white rounded border border-slate-200 p-3 flex gap-3 hover:border-ink-900 transition">
           {% if p.avatar %}
             <img src="{{ p.avatar }}" class="w-14 h-14 rounded object-cover flex-shrink-0">
           {% else %}
-            <div class="w-14 h-14 rounded bg-hse-50 flex items-center justify-center text-hse-700 font-serif text-2xl flex-shrink-0">{{ p.full_name[:1] }}</div>
+            <div class="w-14 h-14 rounded bg-ink-100 flex items-center justify-center text-ink-900 font-serif text-2xl flex-shrink-0">{{ p.full_name[:1] }}</div>
           {% endif %}
           <div class="flex-1 min-w-0">
             <p class="font-semibold text-slate-900 truncate">{{ p.full_name }}</p>
@@ -86,7 +86,11 @@
             {% if p.extra_units %}
               <p class="text-xs text-slate-400 truncate">также: {{ p.extra_units|join('; ') }}</p>
             {% endif %}
-            <p class="text-xs text-slate-400 mt-1">Публикаций: {{ p.publications_total or 0 }}</p>
+            <div class="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+              <span class="stat-dot"><b>{{ p.publications_total or 0 }}</b> публ.</span>
+              <span class="stat-dot"><b>{{ p.courses_count or 0 }}</b> курс{% if p.courses_count != 1 %}.{% endif %}</span>
+              <span class="stat-dot"><b>{{ p.theses_count or 0 }}</b> ВКР</span>
+            </div>
           </div>
         </a>
         {% endfor %}
@@ -144,11 +148,11 @@
           {% if hit.avatar %}
             <img src="{{ hit.avatar }}" class="w-16 h-16 sm:w-24 sm:h-24 rounded object-cover flex-shrink-0">
           {% else %}
-            <div class="w-16 h-16 sm:w-24 sm:h-24 rounded bg-hse-50 flex items-center justify-center text-hse-700 font-serif text-3xl sm:text-4xl">{{ hit.full_name[:1] }}</div>
+            <div class="w-16 h-16 sm:w-24 sm:h-24 rounded bg-ink-100 flex items-center justify-center text-ink-900 font-serif text-3xl sm:text-4xl">{{ hit.full_name[:1] }}</div>
           {% endif %}
           <div class="flex-1 min-w-0">
             <div class="flex items-baseline gap-2">
-              <a href="/persons/{{ hit.person_id }}" class="text-lg font-semibold text-hse-700 hover:underline">{{ hit.full_name }}</a>
+              <a href="/persons/{{ hit.person_id }}" class="text-lg font-semibold text-ink-900 hover:underline">{{ hit.full_name }}</a>
               <span class="text-xs text-slate-400">·</span>
               <a href="{{ hit.profile_url }}" target="_blank" class="text-xs text-slate-500 hover:underline">hse.ru ↗</a>
             </div>
@@ -157,8 +161,11 @@
               <p class="text-xs text-slate-400 mt-1">также: {{ hit.extra_units|join('; ') }}</p>
             {% endif %}
 
-            <div class="mt-2">
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2">
               <span class="tier-badge {{ hit.tier_class }}">{{ hit.tier_label }}</span>
+              <span class="stat-dot"><b>{{ hit.publications_total or 0 }}</b> публ.</span>
+              <span class="stat-dot"><b>{{ hit.courses_count or 0 }}</b> курс.</span>
+              <span class="stat-dot"><b>{{ hit.theses_count or 0 }}</b> ВКР</span>
             </div>
 
             {% if hit.matched_topics %}
@@ -191,19 +198,23 @@
     {% else %}
       <div class="{% if large %}space-y-3{% else %}grid md:grid-cols-2 gap-3{% endif %}">
         {% for p in persons %}
-        <a href="/persons/{{ p.person_id }}" class="bg-white rounded border border-slate-200 {% if large %}p-3 sm:p-4{% else %}p-3{% endif %} flex gap-3 hover:shadow-md hover:border-hse-300 transition">
+        <a href="/persons/{{ p.person_id }}" class="bg-white rounded border border-slate-200 {% if large %}p-3 sm:p-4{% else %}p-3{% endif %} flex gap-3 hover:shadow-md hover:border-ink-300 transition">
           {% if p.avatar %}
             <img src="{{ p.avatar }}" class="{% if large %}w-16 h-16 sm:w-20 sm:h-20{% else %}w-14 h-14{% endif %} rounded object-cover flex-shrink-0">
           {% else %}
-            <div class="{% if large %}w-16 h-16 sm:w-20 sm:h-20{% else %}w-14 h-14{% endif %} rounded bg-hse-50 flex items-center justify-center text-hse-700 font-serif text-2xl flex-shrink-0">{{ p.full_name[:1] }}</div>
+            <div class="{% if large %}w-16 h-16 sm:w-20 sm:h-20{% else %}w-14 h-14{% endif %} rounded bg-ink-100 flex items-center justify-center text-ink-900 font-serif text-2xl flex-shrink-0">{{ p.full_name[:1] }}</div>
           {% endif %}
           <div class="flex-1 min-w-0">
-            <p class="font-semibold text-slate-900 truncate{% if large %} text-lg text-hse-700{% endif %}">{{ p.full_name }}</p>
+            <p class="font-semibold text-slate-900 truncate{% if large %} text-lg text-ink-900{% endif %}">{{ p.full_name }}</p>
             <p class="text-xs text-slate-500 truncate">{{ p.primary_unit or '—' }}{% if p.campus_name %} · {{ p.campus_name }}{% endif %}</p>
             {% if p.extra_units %}
               <p class="text-xs text-slate-400 truncate">также: {{ p.extra_units|join('; ') }}</p>
             {% endif %}
-            <p class="text-xs text-slate-400 mt-1">Публикаций: {{ p.publications_total or 0 }}</p>
+            <div class="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+              <span class="stat-dot"><b>{{ p.publications_total or 0 }}</b> публ.</span>
+              <span class="stat-dot"><b>{{ p.courses_count or 0 }}</b> курс.</span>
+              <span class="stat-dot"><b>{{ p.theses_count or 0 }}</b> ВКР</span>
+            </div>
           </div>
         </a>
         {% endfor %}
@@ -215,7 +226,7 @@
   {% macro section_publications() %}
   <section class="mb-10">
     <h2 class="text-xl font-bold font-serif mb-1">Публикации <span class="text-sm font-normal text-slate-500">— семантический поиск по смыслу</span></h2>
-    <p class="text-xs text-slate-400 mb-3">Топ-5 ближайших по cosine. Точный поиск по подстроке: <a href="/publications?q={{ q|urlencode }}" class="underline hover:text-hse-700">/publications →</a></p>
+    <p class="text-xs text-slate-400 mb-3">Топ-5 ближайших по cosine. Точный поиск по подстроке: <a href="/publications?q={{ q|urlencode }}" class="underline hover:text-ink-900">/publications →</a></p>
     {% if not publications %}
       <p class="text-slate-500 italic">Ничего не нашли.</p>
     {% else %}
@@ -243,7 +254,7 @@
             {% endif %}
             {% if pub.authors %}
               <p class="text-sm text-slate-600 mt-1 italic">
-                {% for a in pub.authors[:5] %}{% if a.is_hse_person and a.person_id %}<a href="/persons/{{ a.person_id }}" class="hover:underline text-hse-700">{{ a.display_name }}</a>{% else %}{{ a.display_name }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% if pub.authors|length > 5 %} + ещё {{ pub.authors|length - 5 }}{% endif %}
+                {% for a in pub.authors[:5] %}{% if a.is_hse_person and a.person_id %}<a href="/persons/{{ a.person_id }}" class="hover:underline text-ink-900">{{ a.display_name }}</a>{% else %}{{ a.display_name }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% if pub.authors|length > 5 %} + ещё {{ pub.authors|length - 5 }}{% endif %}
               </p>
             {% endif %}
             {% if pub.editors %}
@@ -259,9 +270,9 @@
               </details>
             {% endif %}
             <div class="mt-2 flex flex-wrap gap-2 text-xs">
-              {% if pub.doi_url %}<a href="{{ pub.doi_url }}" target="_blank" class="text-hse-700 hover:underline">DOI ↗</a>{% endif %}
-              {% if pub.document_url %}<a href="{{ pub.document_url }}" target="_blank" class="text-hse-700 hover:underline">PDF ↗</a>{% endif %}
-              {% if pub.external_url %}<a href="{{ pub.external_url }}" target="_blank" class="text-hse-700 hover:underline">Внешняя ссылка ↗</a>{% endif %}
+              {% if pub.doi_url %}<a href="{{ pub.doi_url }}" target="_blank" class="text-ink-900 hover:underline">DOI ↗</a>{% endif %}
+              {% if pub.document_url %}<a href="{{ pub.document_url }}" target="_blank" class="text-ink-900 hover:underline">PDF ↗</a>{% endif %}
+              {% if pub.external_url %}<a href="{{ pub.external_url }}" target="_blank" class="text-ink-900 hover:underline">Внешняя ссылка ↗</a>{% endif %}
             </div>
           </div>
         </div>
@@ -287,7 +298,7 @@
             {% if c.language %} · {{ c.language }}{% endif %}
           </p>
           <p class="text-sm mt-1">
-            <a href="/persons/{{ c.person_id }}" class="text-hse-700 hover:underline">{{ c.person_name }}</a>
+            <a href="/persons/{{ c.person_id }}" class="text-ink-900 hover:underline">{{ c.person_name }}</a>
             <span class="text-slate-500">· <em>{{ c.person_unit or '—' }}</em></span>
           </p>
         </div>
