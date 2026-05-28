@@ -43,6 +43,13 @@ services:
       APP_VERSION: ${APP_VERSION}
       CORS_ORIGINS: ${CORS_ORIGINS}
       ADMIN_TOKEN: ${ADMIN_TOKEN}
+      # HTTP Basic auth для /admin (UI). Если пусто — UI закрыт 403.
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Периодический job: scrape + ВКР + enrich пустых embedding'ов
+      # раз в N суток. 0 = выключен.
+      SCHEDULE_DAYS: ${SCHEDULE_DAYS:-0}
+      SCHEDULE_RUN_ON_STARTUP: ${SCHEDULE_RUN_ON_STARTUP:-false}
     ports:
       # Биндим на localhost — host-nginx (или другой proxy в проде)
       # проксирует сюда. Наружу 8000 не светим, TLS — забота nginx'а.
