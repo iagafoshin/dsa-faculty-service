@@ -131,8 +131,16 @@ async def vector_search_publications(
     return [(p, float(s)) for p, s in rows]
 
 
-def compute_matched_topics(query: str, person_topics: list[str] | None) -> list[str]:
+def compute_matched_topics(
+    query: str,
+    interests_extracted: list[str] | None,
+    interests_raw: list[str] | None = None,
+) -> list[str]:
     """Substring-сопоставление токенов запроса с тегами персоны.
+
+    Приоритет: сначала ищем в `interests_raw` (HSE-listed — всегда чистые
+    и в нормальной форме типа «теория графов»). Если там пусто или мало —
+    дополняем `interests_extracted` (KeyBERT, может содержать обрезки).
 
     На коротких запросах (2-4 слова) KeyBERT возвращает [], поэтому
     пересечение query_tags ∩ interests было бы пустым. Подстрока — даёт
@@ -141,9 +149,21 @@ def compute_matched_topics(query: str, person_topics: list[str] | None) -> list[
     query_tokens = [t.lower() for t in query.split() if len(t) > 2]
     if not query_tokens:
         return []
-    matched: list[str] = []
-    for topic in person_topics or []:
-        topic_lower = topic.lower()
-        if any(token in topic_lower for token in query_tokens):
-            matched.append(topic)
-    return matched
+
+    def _match(topics: list[str] | None) -> list[str]:
+        out: list[str] = []
+        for topic in topics or []:
+            tl = str(topic).lower()
+            if any(token in tl for token in query_tokens):
+                out.append(str(topic))
+        return out
+
+    raw_hits = _match(interests_raw)
+    if len(raw_hits) >= 3:
+        return raw_hits[:6]
+
+    # Дополняем извлечёнными тегами, дедуп по подстроке.
+    extra = _match(interests_extracted)
+    raw_lower = [t.lower() for t in raw_hits]
+    deduped_extra = [t for t in extra if not any(t.lower() in r or r in t.lower() for r in raw_lower)]
+    return (raw_hits + deduped_extra)[:6]

@@ -26,13 +26,21 @@ def build_person_context(
     courses: list[Course],
     theses: list[Thesis] | None = None,
 ) -> str:
-    """Склеивает имя, интересы, биографию, опыт, заголовки и абстракты
-    последних публикаций + уникальные названия преподаваемых курсов
-    + темы курируемых ВКР (если есть) в один текст (~5000 символов).
+    """Склеивает плотный «тематический» профиль персоны: имя, интересы,
+    темы ВКР, названия публикаций и курсов (~5000 симв).
 
-    Порядок секций важен: при усечении до _MAX_PERSON_CTX в конце урежется
-    хвост публикаций, а не интересы / ВКР / курсы — это самый плотный
-    «студенто-релевантный» сигнал и должен оставаться приоритетным.
+    НЕ включаем: bio_notes, work_experience, abstracts публикаций.
+    Бенчмарк на 30 случайных персонах × 4 ngram-варианта KeyBERT
+    показал, что эти секции почти не повышают recall (1pp) против
+    HSE-`interests`, но дают +4-5pp truncation rate в тегах — там
+    много дат, должностей и шаблонных конструкций («this paper»,
+    «начал работать в», «академия им жуковского») которые KeyBERT
+    выдёргивает как ключевые фразы. Лучше отдать модели меньше
+    шума.
+
+    Порядок секций (interests → ВКР → публикации → курсы) важен:
+    при усечении урежется хвост менее ценных публикаций, а не
+    плотные «студенто-релевантные» темы.
     """
     parts: list[str] = [person.full_name]
 
@@ -54,24 +62,11 @@ def build_person_context(
         if thesis_titles:
             parts.append("Темы ВКР: " + "; ".join(thesis_titles))
 
-    bio = _take_lines(person.bio_notes)
-    if bio:
-        parts.append(" ".join(bio))
-
-    experience = _take_lines(person.work_experience, limit=5)
-    if experience:
-        parts.append(" ".join(experience))
-
     pub_lines: list[str] = []
     for pub in publications[:30]:
         title = (pub.title or "").strip()
-        abstract = pub.abstract_ru or pub.abstract_en
-        if title and abstract:
-            pub_lines.append(f"{title}. {abstract}")
-        elif title:
+        if title:
             pub_lines.append(title)
-        elif abstract:
-            pub_lines.append(abstract)
     if pub_lines:
         parts.append(" ".join(pub_lines))
 

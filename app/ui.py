@@ -187,7 +187,9 @@ async def home(
                     "score": float(score),
                     "tier_label": tier[0],
                     "tier_class": tier[1],
-                    "matched_topics": compute_matched_topics(q, person.interests_extracted),
+                    "matched_topics": compute_matched_topics(
+                        q, person.interests_extracted, person.interests,
+                    ),
                     "top_publications": [
                         {"year": p.year, "title": p.title}
                         for p in top_pubs.get(person.person_id, [])

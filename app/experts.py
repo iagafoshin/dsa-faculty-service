@@ -98,7 +98,9 @@ async def search_experts(
             primary_unit=person.primary_unit,
             campus_name=campus_name,
             score=float(score),
-            matched_topics=compute_matched_topics(q, person.interests_extracted),
+            matched_topics=compute_matched_topics(
+                q, person.interests_extracted, person.interests,
+            ),
             top_publications=[
                 _pub_to_out(p) for p in top_pubs_by_person.get(person.person_id, [])
             ],

@@ -347,7 +347,11 @@ def _keybert_keywords(text: str, max_tags: int) -> list[tuple[str, float]]:
     try:
         return _get_keybert().extract_keywords(
             text,
-            keyphrase_ngram_range=(1, 3),
+            # ngram (1, 4): A/B на 30 персонах vs (1,3) даёт +1.4pp recall vs HSE-interests
+            # и -1.3pp truncation rate. (1,5) ещё чуть выше recall, но фразы становятся
+            # длинными простынями («предлагает применить процедурно-параметрическую парадигму»),
+            # их хуже показывать в UI и матчить против коротких запросов.
+            keyphrase_ngram_range=(1, 4),
             top_n=max_tags * 2,
             use_mmr=True,
             diversity=0.5,
