@@ -13,17 +13,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+import uuid
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from datetime import datetime, timezone
-import uuid
-
-from fastapi import BackgroundTasks, Form
-from fastapi.responses import RedirectResponse
 
 from app.database import AsyncSessionLocal, get_session
 from app.models import Authorship, Campus, Course, Person, Publication, ScrapeJob
