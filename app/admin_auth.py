@@ -16,11 +16,14 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app.config import settings
 
-_basic = HTTPBasic(realm="DSA Faculty Admin")
+_REALM = "DSA Faculty Admin"
+# auto_error=False — сами выбрасываем 401 с заголовком WWW-Authenticate,
+# чтобы браузер показал нативный login-prompt вместо JSON-ошибки.
+_basic = HTTPBasic(realm=_REALM, auto_error=False)
 
 
 def require_admin_basic(
-    creds: HTTPBasicCredentials = Depends(_basic),
+    creds: HTTPBasicCredentials | None = Depends(_basic),
 ) -> str:
     """Проверяет HTTP Basic-кредеши против ADMIN_USER/ADMIN_PASSWORD.
 
@@ -33,13 +36,22 @@ def require_admin_basic(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin UI закрыта: задайте ADMIN_PASSWORD в окружении.",
         )
+
+    auth_header = {"WWW-Authenticate": f'Basic realm="{_REALM}"'}
+    if creds is None:
+        # Юзер не прислал креды — показать браузерный login-диалог
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers=auth_header,
+        )
     user_ok = secrets.compare_digest(creds.username, settings.admin_user)
     pass_ok = secrets.compare_digest(creds.password, settings.admin_password)
     if not (user_ok and pass_ok):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Неверный логин или пароль",
-            headers={"WWW-Authenticate": 'Basic realm="DSA Faculty Admin"'},
+            headers=auth_header,
         )
     return creds.username
 

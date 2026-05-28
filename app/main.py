@@ -52,11 +52,15 @@ app.add_middleware(
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request, exc: StarletteHTTPException):
     body = exc.detail
+    # Заголовки исключения (например, WWW-Authenticate от HTTPBasic) НЕЛЬЗЯ
+    # терять — иначе браузер не покажет диалог логина и юзер увидит JSON.
+    headers = getattr(exc, "headers", None) or {}
     if isinstance(body, dict) and "code" in body and "message" in body:
-        return JSONResponse(status_code=exc.status_code, content=body)
+        return JSONResponse(status_code=exc.status_code, content=body, headers=headers)
     return JSONResponse(
         status_code=exc.status_code,
         content={"code": _STATUS_CODES.get(exc.status_code, "error"), "message": str(exc.detail)},
+        headers=headers,
     )
 
 
