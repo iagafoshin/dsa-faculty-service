@@ -31,6 +31,7 @@ from app.scraper.crawler import crawl_and_ingest
 from app.vector_search import (
     TEACHER_FILTER_SQL,
     compute_matched_topics,
+    faculty_filter_sql,
     vector_search_persons,
     vector_search_publications,
 )
@@ -112,11 +113,16 @@ def _pub_to_dict(p: Publication, authors: list[AuthorRef] | None = None) -> dict
         "type": p.type,
         "language": p.language,
         "publisher": p.publisher,
+        "venue": p.venue,
+        "citation": p.citation,
         "abstract_ru": p.abstract_ru,
         "abstract_en": p.abstract_en,
         "doi_url": p.doi_url,
         "document_url": p.document_url,
         "external_url": p.external_url,
+        "cover_url": p.cover_url,
+        "editors": p.editors or [],
+        "translators": p.translators or [],
         "authors": authors or [],
     }
 
@@ -136,6 +142,26 @@ _EXAMPLE_QUERIES = [
     "Квантовые алгоритмы оптимизации",
     "Веб-приложение для обучения программированию",
 ]
+
+
+def _extra_units(person: Person) -> list[str]:
+    """Все уникальные имена `positions[].units[].name`, кроме primary_unit.
+
+    Используется на карточках как чипсы — у совмещённых преподов второй
+    факультет тоже виден.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    primary = (person.primary_unit or "").strip()
+    for pos in person.positions or []:
+        if not isinstance(pos, dict):
+            continue
+        for u in pos.get("units") or []:
+            name = (u.get("name") or "").strip() if isinstance(u, dict) else ""
+            if name and name != primary and name not in seen:
+                seen.add(name)
+                out.append(name)
+    return out
 
 
 _BROWSE_ORDER = {
@@ -210,7 +236,7 @@ async def home(
         if campus_id:
             base = base.where(Person.campus_id == campus_id)
         if faculty:
-            base = base.where(Person.primary_unit.ilike(f"%{faculty}%"))
+            base = base.where(faculty_filter_sql(faculty))
         if has_publications == "true":
             base = base.where(Person.publications_total > 0)
         elif has_publications == "false":
@@ -231,6 +257,7 @@ async def home(
                 "full_name": person.full_name,
                 "avatar": person.avatar,
                 "primary_unit": person.primary_unit,
+                "extra_units": _extra_units(person),
                 "publications_total": person.publications_total,
                 "campus_name": c_name,
             })
@@ -270,6 +297,7 @@ async def home(
                     "profile_url": person.profile_url,
                     "avatar": person.avatar,
                     "primary_unit": person.primary_unit,
+                    "extra_units": _extra_units(person),
                     "campus_name": c_name,
                     "score": float(score),
                     "tier_label": tier[0],
@@ -351,7 +379,7 @@ async def home(
         if campus_id:
             per_q = per_q.where(Person.campus_id == campus_id)
         if faculty:
-            per_q = per_q.where(Person.primary_unit.ilike(f"%{faculty}%"))
+            per_q = per_q.where(faculty_filter_sql(faculty))
         per_q = per_q.order_by(
             Person.publications_total.desc().nullslast(), Person.full_name.asc()
         ).limit(per_limit)
@@ -361,6 +389,7 @@ async def home(
                 "full_name": person.full_name,
                 "avatar": person.avatar,
                 "primary_unit": person.primary_unit,
+                "extra_units": _extra_units(person),
                 "publications_total": person.publications_total,
                 "campus_name": c_name,
             })
@@ -557,18 +586,53 @@ async def person_profile(
     pubs = list((await db.execute(pub_q)).scalars().all())
     pubs_data = [_pub_to_dict(pub) for pub in pubs]
 
+    # Курсы: грузим ВСЕ, группируем по title, потом пагинируем уже
+    # дедуплицированный список. Один курс часто читается несколько
+    # лет / на нескольких программах — в БД из-за этого 3-5 строк
+    # на «Машинное обучение», на профиле это выглядело как спам.
     CRS_PAGE_SIZE = 20
-    crs_q = select(Course).where(Course.person_id == person_id)
-    course_total = (await db.execute(
-        select(func.count()).select_from(crs_q.order_by(None).subquery())
-    )).scalar_one()
+    all_courses = (await db.execute(
+        select(Course)
+        .where(Course.person_id == person_id)
+        .order_by(Course.academic_year.desc().nullslast(), Course.id.desc())
+    )).scalars().all()
+
+    courses_by_title: dict[str, dict[str, Any]] = {}
+    for c in all_courses:
+        title = (c.title or "").strip()
+        if not title:
+            continue
+        bucket = courses_by_title.setdefault(title, {
+            "title": title,
+            "years": [],
+            "levels": set(),
+            "languages": set(),
+        })
+        if c.academic_year and c.academic_year not in bucket["years"]:
+            bucket["years"].append(c.academic_year)
+        if c.level:
+            bucket["levels"].add(c.level)
+        if c.language:
+            bucket["languages"].add(c.language)
+
+    course_total = len(courses_by_title)
     course_pages = max(1, (course_total + CRS_PAGE_SIZE - 1) // CRS_PAGE_SIZE)
-    crs_q = crs_q.order_by(Course.academic_year.desc().nullslast(), Course.id.desc())
-    crs_q = crs_q.limit(CRS_PAGE_SIZE).offset((course_page - 1) * CRS_PAGE_SIZE)
-    courses = [{
-        "title": c.title, "academic_year": c.academic_year,
-        "level": c.level, "language": c.language,
-    } for c in (await db.execute(crs_q)).scalars().all()]
+
+    # Сортировка по самому свежему academic_year группы (DESC).
+    def _latest_year(item: dict[str, Any]) -> str:
+        return max(item["years"], default="")
+    deduped = sorted(courses_by_title.values(), key=_latest_year, reverse=True)
+    start = (course_page - 1) * CRS_PAGE_SIZE
+    courses = [
+        {
+            "title": item["title"],
+            "years": item["years"],
+            "levels": sorted(item["levels"]),
+            "languages": sorted(item["languages"]),
+            "times_taught": len(item["years"]),
+        }
+        for item in deduped[start:start + CRS_PAGE_SIZE]
+    ]
 
     return templates.TemplateResponse(request, "profile.html", {
         "person": person_data,

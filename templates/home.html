@@ -3,18 +3,18 @@
 
 {% block content %}
 <div class="text-center mb-6 sm:mb-8">
-  <h1 class="text-xl sm:text-3xl font-bold text-slate-900 mb-2">🎯 Подбор научрука для курсовой</h1>
-  <p class="text-sm sm:text-base text-slate-600">Опишите проект — найдём эксперта НИУ ВШЭ, релевантные публикации, преподаваемые курсы.</p>
+  <h1 class="text-2xl sm:text-3xl font-bold text-slate-900 mb-2 font-serif">Подбор научного руководителя</h1>
+  <p class="text-sm sm:text-base text-slate-600">Опишите проект — найдём эксперта НИУ ВШЭ, релевантные публикации и преподаваемые курсы.</p>
 </div>
 
 <form method="get" action="/" class="mb-6 sm:mb-8">
   <div class="flex flex-col sm:flex-row gap-2">
     <input type="text" name="q" value="{{ q or '' }}"
            placeholder="Опишите проект или введите фамилию..."
-           class="flex-1 px-4 py-3 rounded-lg border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none text-base"
+           class="flex-1 px-4 py-3 rounded-lg border border-slate-300 focus:border-hse-700 focus:ring-2 focus:ring-hse-200 outline-none text-base"
            autofocus>
-    <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 whitespace-nowrap">
-      🔍 Найти
+    <button type="submit" class="px-6 py-3 bg-hse-700 text-white font-medium rounded hover:bg-hse-800 whitespace-nowrap">
+      Найти
     </button>
   </div>
 
@@ -40,7 +40,7 @@
 
 {% if not q %}
   <div class="bg-blue-50 border border-blue-200 text-blue-800 rounded-lg p-4 mb-4">
-    💡 Опишите тему проекта или укажите фамилию интересующего преподавателя — и нажмите <b>Найти</b>.
+    Опишите тему проекта или укажите фамилию преподавателя — и нажмите <b>Найти</b>.
   </div>
   <div class="text-xs text-slate-500 mb-2">Попробуйте, например:</div>
   <div class="flex flex-wrap gap-2 mb-10">
@@ -52,8 +52,8 @@
   {# === Browse-режим (бывший /persons) — все преподы с пагинацией === #}
   <section>
     <div class="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
-      <h2 class="text-xl font-bold">
-        👥 Все преподаватели
+      <h2 class="text-xl font-bold font-serif">
+        Все преподаватели
         <span class="text-sm font-normal text-slate-500">— {{ '{:,}'.format(browse_total).replace(',', ' ') }}</span>
       </h2>
       <form method="get" action="/" class="flex items-center gap-2 text-sm">
@@ -74,15 +74,18 @@
     {% else %}
       <div class="grid md:grid-cols-2 gap-3">
         {% for p in browse_results %}
-        <a href="/persons/{{ p.person_id }}" class="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex gap-3 hover:shadow-md hover:border-indigo-300 transition">
+        <a href="/persons/{{ p.person_id }}" class="bg-white rounded border border-slate-200 p-3 flex gap-3 hover:border-hse-700 transition">
           {% if p.avatar %}
-            <img src="{{ p.avatar }}" class="w-14 h-14 rounded-lg object-cover flex-shrink-0">
+            <img src="{{ p.avatar }}" class="w-14 h-14 rounded object-cover flex-shrink-0">
           {% else %}
-            <div class="w-14 h-14 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-xl flex-shrink-0">👤</div>
+            <div class="w-14 h-14 rounded bg-hse-50 flex items-center justify-center text-hse-700 font-serif text-2xl flex-shrink-0">{{ p.full_name[:1] }}</div>
           {% endif %}
           <div class="flex-1 min-w-0">
             <p class="font-semibold text-slate-900 truncate">{{ p.full_name }}</p>
             <p class="text-xs text-slate-500 truncate">{{ p.primary_unit or '—' }}{% if p.campus_name %} · {{ p.campus_name }}{% endif %}</p>
+            {% if p.extra_units %}
+              <p class="text-xs text-slate-400 truncate">также: {{ p.extra_units|join('; ') }}</p>
+            {% endif %}
             <p class="text-xs text-slate-400 mt-1">Публикаций: {{ p.publications_total or 0 }}</p>
           </div>
         </a>
@@ -126,7 +129,7 @@
 
   {% macro section_experts(title, secondary=False) %}
   <section id="experts" class="mb-10 scroll-mt-16">
-    <h2 class="text-xl font-bold mb-3">{{ title|safe }}{% if not secondary %} <span class="text-sm font-normal text-slate-500">— стр. {{ exp_page }}</span>{% endif %}</h2>
+    <h2 class="text-xl font-bold font-serif mb-3">{{ title|safe }}{% if not secondary %} <span class="text-sm font-normal text-slate-500">— стр. {{ exp_page }}</span>{% endif %}</h2>
     {% if experts_error %}
       <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4">
         Не удалось получить данные: {{ experts_error }}
@@ -137,19 +140,22 @@
     {% else %}
       <div class="space-y-3">
         {% for hit in experts %}
-        <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-3 sm:p-4 flex gap-3 sm:gap-4">
+        <div class="bg-white rounded border border-slate-200 p-3 sm:p-4 flex gap-3 sm:gap-4">
           {% if hit.avatar %}
-            <img src="{{ hit.avatar }}" class="w-16 h-16 sm:w-24 sm:h-24 rounded-lg object-cover flex-shrink-0">
+            <img src="{{ hit.avatar }}" class="w-16 h-16 sm:w-24 sm:h-24 rounded object-cover flex-shrink-0">
           {% else %}
-            <div class="w-16 h-16 sm:w-24 sm:h-24 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-2xl sm:text-3xl">👤</div>
+            <div class="w-16 h-16 sm:w-24 sm:h-24 rounded bg-hse-50 flex items-center justify-center text-hse-700 font-serif text-3xl sm:text-4xl">{{ hit.full_name[:1] }}</div>
           {% endif %}
           <div class="flex-1 min-w-0">
             <div class="flex items-baseline gap-2">
-              <a href="/persons/{{ hit.person_id }}" class="text-lg font-semibold text-indigo-700 hover:underline">{{ hit.full_name }}</a>
+              <a href="/persons/{{ hit.person_id }}" class="text-lg font-semibold text-hse-700 hover:underline">{{ hit.full_name }}</a>
               <span class="text-xs text-slate-400">·</span>
               <a href="{{ hit.profile_url }}" target="_blank" class="text-xs text-slate-500 hover:underline">hse.ru ↗</a>
             </div>
             <p class="text-sm text-slate-600">{{ hit.primary_unit or '—' }}{% if hit.campus_name %} · {{ hit.campus_name }}{% endif %}</p>
+            {% if hit.extra_units %}
+              <p class="text-xs text-slate-400 mt-1">также: {{ hit.extra_units|join('; ') }}</p>
+            {% endif %}
 
             <div class="mt-2">
               <span class="tier-badge {{ hit.tier_class }}">{{ hit.tier_label }}</span>
@@ -179,21 +185,24 @@
 
   {% macro section_persons(title, large=False) %}
   <section class="mb-10">
-    <h2 class="text-xl font-bold mb-3">{{ title|safe }}</h2>
+    <h2 class="text-xl font-bold font-serif mb-3">{{ title|safe }}</h2>
     {% if not persons %}
       <p class="text-slate-500 italic">Никого не нашли.</p>
     {% else %}
       <div class="{% if large %}space-y-3{% else %}grid md:grid-cols-2 gap-3{% endif %}">
         {% for p in persons %}
-        <a href="/persons/{{ p.person_id }}" class="bg-white rounded-lg shadow-sm border border-slate-200 {% if large %}p-3 sm:p-4{% else %}p-3{% endif %} flex gap-3 hover:shadow-md hover:border-indigo-300 transition">
+        <a href="/persons/{{ p.person_id }}" class="bg-white rounded border border-slate-200 {% if large %}p-3 sm:p-4{% else %}p-3{% endif %} flex gap-3 hover:shadow-md hover:border-hse-300 transition">
           {% if p.avatar %}
-            <img src="{{ p.avatar }}" class="{% if large %}w-16 h-16 sm:w-20 sm:h-20{% else %}w-14 h-14{% endif %} rounded-lg object-cover flex-shrink-0">
+            <img src="{{ p.avatar }}" class="{% if large %}w-16 h-16 sm:w-20 sm:h-20{% else %}w-14 h-14{% endif %} rounded object-cover flex-shrink-0">
           {% else %}
-            <div class="{% if large %}w-16 h-16 sm:w-20 sm:h-20{% else %}w-14 h-14{% endif %} rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-xl flex-shrink-0">👤</div>
+            <div class="{% if large %}w-16 h-16 sm:w-20 sm:h-20{% else %}w-14 h-14{% endif %} rounded bg-hse-50 flex items-center justify-center text-hse-700 font-serif text-2xl flex-shrink-0">{{ p.full_name[:1] }}</div>
           {% endif %}
           <div class="flex-1 min-w-0">
-            <p class="font-semibold text-slate-900 truncate{% if large %} text-lg text-indigo-700{% endif %}">{{ p.full_name }}</p>
+            <p class="font-semibold text-slate-900 truncate{% if large %} text-lg text-hse-700{% endif %}">{{ p.full_name }}</p>
             <p class="text-xs text-slate-500 truncate">{{ p.primary_unit or '—' }}{% if p.campus_name %} · {{ p.campus_name }}{% endif %}</p>
+            {% if p.extra_units %}
+              <p class="text-xs text-slate-400 truncate">также: {{ p.extra_units|join('; ') }}</p>
+            {% endif %}
             <p class="text-xs text-slate-400 mt-1">Публикаций: {{ p.publications_total or 0 }}</p>
           </div>
         </a>
@@ -205,37 +214,56 @@
 
   {% macro section_publications() %}
   <section class="mb-10">
-    <h2 class="text-xl font-bold mb-1">📚 Публикации <span class="text-sm font-normal text-slate-500">— семантический поиск по смыслу</span></h2>
-    <p class="text-xs text-slate-400 mb-3">Топ-5 ближайших по cosine. Точный поиск по подстроке: <a href="/publications?q={{ q|urlencode }}" class="underline hover:text-indigo-600">/publications →</a></p>
+    <h2 class="text-xl font-bold font-serif mb-1">Публикации <span class="text-sm font-normal text-slate-500">— семантический поиск по смыслу</span></h2>
+    <p class="text-xs text-slate-400 mb-3">Топ-5 ближайших по cosine. Точный поиск по подстроке: <a href="/publications?q={{ q|urlencode }}" class="underline hover:text-hse-700">/publications →</a></p>
     {% if not publications %}
       <p class="text-slate-500 italic">Ничего не нашли.</p>
     {% else %}
       <div class="space-y-3">
         {% for pub in publications %}
-        <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
-          <div class="flex items-baseline gap-2">
-            <h3 class="font-semibold text-slate-900 flex-1">{{ pub.title }}</h3>
-            {% if pub.score is not none %}
-              <span class="text-xs font-mono text-slate-400">{{ '%.3f'|format(pub.score) }}</span>
-            {% endif %}
-          </div>
-          <p class="text-xs text-slate-500 mt-1">
-            {% if pub.year %}<b>{{ pub.year }}</b>{% endif %}
-            {% if pub.type %} · {{ pub.type }}{% endif %}
-            {% if pub.language %} · {{ pub.language }}{% endif %}
-            {% if pub.publisher %} · {{ pub.publisher }}{% endif %}
-          </p>
-          {% if pub.authors %}
-            <p class="text-sm text-slate-600 mt-1 italic">
-              {% for a in pub.authors[:3] %}{% if a.is_hse_person and a.person_id %}<a href="/persons/{{ a.person_id }}" class="hover:underline text-indigo-700">{{ a.display_name }}</a>{% else %}{{ a.display_name }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% if pub.authors|length > 3 %} + ещё {{ pub.authors|length - 3 }}{% endif %}
+        <div class="bg-white rounded border border-slate-200 p-4 flex gap-3">
+          {% if pub.cover_url %}
+            <img src="{{ pub.cover_url }}" class="w-16 h-24 object-cover rounded flex-shrink-0 hidden sm:block">
+          {% endif %}
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline gap-2">
+              <h3 class="font-semibold text-slate-900 flex-1">{{ pub.title }}</h3>
+              {% if pub.score is not none %}
+                <span class="text-xs font-mono text-slate-400">{{ '%.3f'|format(pub.score) }}</span>
+              {% endif %}
+            </div>
+            <p class="text-xs text-slate-500 mt-1">
+              {% if pub.year %}<b>{{ pub.year }}</b>{% endif %}
+              {% if pub.type %} · {{ pub.type }}{% endif %}
+              {% if pub.language %} · {{ pub.language }}{% endif %}
+              {% if pub.publisher %} · {{ pub.publisher }}{% endif %}
             </p>
-          {% endif %}
-          {% if pub.abstract_ru or pub.abstract_en %}
-            <p class="text-sm text-slate-500 mt-2 truncate-2">{{ pub.abstract_ru or pub.abstract_en }}</p>
-          {% endif %}
-          {% if pub.doi_url %}
-            <a href="{{ pub.doi_url }}" target="_blank" class="text-xs text-indigo-600 hover:underline mt-2 inline-block">🔗 DOI ↗</a>
-          {% endif %}
+            {% if pub.venue %}
+              <p class="text-xs text-slate-600 mt-1"><em>{{ pub.venue }}</em></p>
+            {% endif %}
+            {% if pub.authors %}
+              <p class="text-sm text-slate-600 mt-1 italic">
+                {% for a in pub.authors[:5] %}{% if a.is_hse_person and a.person_id %}<a href="/persons/{{ a.person_id }}" class="hover:underline text-hse-700">{{ a.display_name }}</a>{% else %}{{ a.display_name }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% if pub.authors|length > 5 %} + ещё {{ pub.authors|length - 5 }}{% endif %}
+              </p>
+            {% endif %}
+            {% if pub.editors %}
+              <p class="text-xs text-slate-500 mt-1">Ред.: {% for e in pub.editors[:3] %}{{ e.display_name }}{% if not loop.last %}, {% endif %}{% endfor %}{% if pub.editors|length > 3 %} + ещё {{ pub.editors|length - 3 }}{% endif %}</p>
+            {% endif %}
+            {% if pub.abstract_ru or pub.abstract_en %}
+              <p class="text-sm text-slate-500 mt-2 truncate-2">{{ pub.abstract_ru or pub.abstract_en }}</p>
+            {% endif %}
+            {% if pub.citation %}
+              <details class="mt-2">
+                <summary class="text-xs text-slate-400 cursor-pointer hover:text-slate-600">Цитирование</summary>
+                <p class="text-xs text-slate-600 mt-1 leading-snug">{{ pub.citation }}</p>
+              </details>
+            {% endif %}
+            <div class="mt-2 flex flex-wrap gap-2 text-xs">
+              {% if pub.doi_url %}<a href="{{ pub.doi_url }}" target="_blank" class="text-hse-700 hover:underline">DOI ↗</a>{% endif %}
+              {% if pub.document_url %}<a href="{{ pub.document_url }}" target="_blank" class="text-hse-700 hover:underline">PDF ↗</a>{% endif %}
+              {% if pub.external_url %}<a href="{{ pub.external_url }}" target="_blank" class="text-hse-700 hover:underline">Внешняя ссылка ↗</a>{% endif %}
+            </div>
+          </div>
         </div>
         {% endfor %}
       </div>
@@ -245,13 +273,13 @@
 
   {% macro section_courses() %}
   <section class="mb-10">
-    <h2 class="text-xl font-bold mb-3">🎓 Курсы</h2>
+    <h2 class="text-xl font-bold font-serif mb-3">Курсы</h2>
     {% if not courses %}
       <p class="text-slate-500 italic">Ничего не нашли.</p>
     {% else %}
       <div class="space-y-2">
         {% for c in courses %}
-        <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-3">
+        <div class="bg-white rounded border border-slate-200 p-3">
           <h3 class="font-semibold text-slate-900">{{ c.title }}</h3>
           <p class="text-xs text-slate-500 mt-1">
             {% if c.academic_year %}{{ c.academic_year }}{% endif %}
@@ -259,7 +287,7 @@
             {% if c.language %} · {{ c.language }}{% endif %}
           </p>
           <p class="text-sm mt-1">
-            👤 <a href="/persons/{{ c.person_id }}" class="text-indigo-700 hover:underline">{{ c.person_name }}</a>
+            <a href="/persons/{{ c.person_id }}" class="text-hse-700 hover:underline">{{ c.person_name }}</a>
             <span class="text-slate-500">· <em>{{ c.person_unit or '—' }}</em></span>
           </p>
         </div>
@@ -271,15 +299,15 @@
 
   {# === Layout: name-query promotes the persons section, hides publications/courses === #}
   {% if is_name_query %}
-    {{ section_persons("👤 Преподаватели по фамилии", large=True) }}
+    {{ section_persons("Преподаватели по фамилии", large=True) }}
     {% if experts %}
-      {{ section_experts("🔍 Возможно, по теме", secondary=True) }}
+      {{ section_experts("Возможно, по теме", secondary=True) }}
     {% endif %}
   {% else %}
-    {{ section_experts("🎯 Эксперты по теме") }}
+    {{ section_experts("Эксперты по теме") }}
     {{ section_publications() }}
     {{ section_courses() }}
-    {{ section_persons("👥 Также нашли по фамилии") }}
+    {{ section_persons("Также нашли по фамилии") }}
   {% endif %}
 
 {% endif %}

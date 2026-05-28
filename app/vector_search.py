@@ -32,6 +32,22 @@ TEACHER_FILTER_SQL = text(
 ).bindparams(teacher_re=TEACHER_TITLE_RE)
 
 
+def faculty_filter_sql(faculty: str):
+    """SQL-фильтр «есть подразделение, содержащее <faculty>».
+
+    Препод может работать на нескольких факультетах: `positions` содержит
+    `[{title, units: [{name, url}, ...]}]`. `primary_unit` — только первый
+    из них; чтобы не упускать совмещённых, бежим по всем `units[].name`.
+    """
+    return text(
+        "EXISTS ("
+        " SELECT 1 FROM jsonb_array_elements(persons.positions) p,"
+        "             jsonb_array_elements(p->'units') u"
+        " WHERE lower(u->>'name') LIKE :faculty_like"
+        ")"
+    ).bindparams(faculty_like=f"%{faculty.lower()}%")
+
+
 async def vector_search_persons(
     db: AsyncSession,
     q: str,
@@ -66,7 +82,10 @@ async def vector_search_persons(
     if campus_id:
         stmt = stmt.where(Person.campus_id == campus_id)
     if primary_unit:
-        stmt = stmt.where(Person.primary_unit.ilike(f"%{primary_unit}%"))
+        # primary_unit — это имя параметра ради обратной совместимости
+        # с /experts/search; фильтр теперь идёт по ЛЮБОМУ из units всех
+        # позиций (совмещённые преподаватели больше не теряются).
+        stmt = stmt.where(faculty_filter_sql(primary_unit))
     if has_publications is True:
         stmt = stmt.where(Person.publications_total > 0)
     elif has_publications is False:
