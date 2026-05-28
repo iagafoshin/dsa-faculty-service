@@ -9,10 +9,27 @@
 """
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Authorship, Campus, Person, Publication
+
+
+# Подбор научрука — отсекаем нерелевантные роли (менеджеры, лаборанты,
+# инженеры, эксперты-аналитики, аспиранты, стажёры-исследователи и т.п.).
+# Whitelist по подстроке в `positions[].title`: достаточно одной подходящей
+# должности, чтобы персона прошла фильтр (у многих ВШЭ-шников их 2-3).
+TEACHER_TITLE_RE = (
+    r"(преподавател|доцент|профессор|ассистент|"
+    r"научный сотрудник|научный руководител|"
+    r"академическ\w+ руководител|заведующий кафедр)"
+)
+_TEACHER_FILTER_SQL = text(
+    "EXISTS ("
+    " SELECT 1 FROM jsonb_array_elements(persons.positions) p"
+    " WHERE lower(p->>'title') ~ :teacher_re"
+    ")"
+).bindparams(teacher_re=TEACHER_TITLE_RE)
 
 
 async def vector_search_persons(
@@ -44,6 +61,7 @@ async def vector_search_persons(
         )
         .outerjoin(Campus, Person.campus_id == Campus.campus_id)
         .where(Person.embedding.is_not(None))
+        .where(_TEACHER_FILTER_SQL)
     )
     if campus_id:
         stmt = stmt.where(Person.campus_id == campus_id)
