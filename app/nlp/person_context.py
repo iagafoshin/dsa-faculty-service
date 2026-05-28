@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from app.models import Course, Person, Publication
+from app.models import Course, Person, Publication, Thesis
 
 _MAX_PERSON_CTX = 5000
 
@@ -24,16 +24,35 @@ def build_person_context(
     person: Person,
     publications: list[Publication],
     courses: list[Course],
+    theses: list[Thesis] | None = None,
 ) -> str:
     """Склеивает имя, интересы, биографию, опыт, заголовки и абстракты
     последних публикаций + уникальные названия преподаваемых курсов
-    в один текст (~5000 символов).
+    + темы курируемых ВКР (если есть) в один текст (~5000 символов).
+
+    Порядок секций важен: при усечении до _MAX_PERSON_CTX в конце урежется
+    хвост публикаций, а не интересы / ВКР / курсы — это самый плотный
+    «студенто-релевантный» сигнал и должен оставаться приоритетным.
     """
     parts: list[str] = [person.full_name]
 
     interests = _take_lines(person.interests)
     if interests:
         parts.append("Интересы: " + "; ".join(interests))
+
+    # Темы ВКР — высочайший по релевантности студентскому домену сигнал
+    # (студенты ищут научрука именно под такие формулировки). Берём до 50
+    # последних работ, чтобы не съесть весь context.
+    if theses:
+        thesis_titles: list[str] = []
+        seen_t: set[str] = set()
+        for t in theses[:50]:
+            title = (t.title or "").strip()
+            if title and title not in seen_t:
+                seen_t.add(title)
+                thesis_titles.append(title)
+        if thesis_titles:
+            parts.append("Темы ВКР: " + "; ".join(thesis_titles))
 
     bio = _take_lines(person.bio_notes)
     if bio:

@@ -203,6 +203,63 @@ class Course(Base):
     )
 
 
+class Thesis(Base):
+    __tablename__ = "theses"
+
+    # `thesis_id` — id из API ВШЭ (`https://www.hse.ru/n/vkr/api/`).
+    thesis_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    level: Mapped[str | None] = mapped_column(String, nullable=True)  # «Бакалавриат» / «Магистратура»
+    student: Mapped[str | None] = mapped_column(String, nullable=True)
+    program: Mapped[str | None] = mapped_column(String, nullable=True)
+    program_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    org_unit: Mapped[str | None] = mapped_column(String, nullable=True)
+    has_en_version: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    raw: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+    supervisors = relationship("ThesisSupervisor", back_populates="thesis", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_theses_year", "year"),
+        Index(
+            "ix_theses_title_trgm",
+            "title",
+            postgresql_using="gin",
+            postgresql_ops={"title": "gin_trgm_ops"},
+        ),
+    )
+
+
+class ThesisSupervisor(Base):
+    """M2M между theses и persons — у ВКР бывает несколько научруков."""
+    __tablename__ = "thesis_supervisors"
+
+    thesis_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("theses.thesis_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    person_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("persons.person_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    # Имя на момент скрейпа — пишем как fallback, если person потом удалили.
+    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    thesis = relationship("Thesis", back_populates="supervisors")
+
+    __table_args__ = (
+        Index("ix_thesis_supervisors_person_id", "person_id"),
+    )
+
+
 class ScrapeJob(Base):
     __tablename__ = "scrape_jobs"
 

@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tqdm import tqdm
 
 from app.database import AsyncSessionLocal
-from app.models import Authorship, Course, Person, Publication
+from app.models import Authorship, Course, Person, Publication, Thesis, ThesisSupervisor
 from app.nlp.embedder import embed_batch
 from app.nlp.extractor import extract_topics_batch, get_device
 from app.nlp.person_context import build_person_context, build_publication_context
@@ -74,6 +74,27 @@ async def _fetch_courses_for_persons(
     return out
 
 
+async def _fetch_theses_for_persons(
+    s: AsyncSession, person_ids: list[int], per_person: int = 50,
+) -> dict[int, list[Thesis]]:
+    """{person_id: [Thesis, ...]} — ВКР персон в батче, отсортированы по году DESC."""
+    rows = (await s.execute(
+        select(ThesisSupervisor.person_id, Thesis)
+        .join(Thesis, ThesisSupervisor.thesis_id == Thesis.thesis_id)
+        .where(ThesisSupervisor.person_id.in_(person_ids))
+        .order_by(
+            ThesisSupervisor.person_id,
+            Thesis.year.desc().nullslast(),
+            Thesis.thesis_id,
+        )
+    )).all()
+    out: dict[int, list[Thesis]] = {pid: [] for pid in person_ids}
+    for pid, t in rows:
+        if len(out[pid]) < per_person:
+            out[pid].append(t)
+    return out
+
+
 async def enrich_persons(
     sample: int | None = None, batch: int = 100, only_empty: bool = False,
 ) -> None:
@@ -117,12 +138,14 @@ async def enrich_persons(
             person_ids = [p.person_id for p in persons]
             pubs_by_person = await _fetch_pubs_for_persons(s, person_ids)
             courses_by_person = await _fetch_courses_for_persons(s, person_ids)
+            theses_by_person = await _fetch_theses_for_persons(s, person_ids)
 
             contexts_all = [
                 build_person_context(
                     p,
                     pubs_by_person.get(p.person_id, []),
                     courses_by_person.get(p.person_id, []),
+                    theses_by_person.get(p.person_id, []),
                 )
                 for p in persons
             ]
