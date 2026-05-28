@@ -148,10 +148,13 @@
       {% for pub in pubs %}
       <div class="border-b border-slate-100 pb-3 last:border-b-0">
         <h4 class="font-medium">{{ pub.title }}</h4>
-        <p class="text-xs text-slate-500 mt-1">
+        <p class="text-xs text-slate-500 mt-1 flex items-baseline gap-2 flex-wrap">
           {% if pub.year %}<b>{{ pub.year }}</b>{% endif %}
-          {% if pub.type %} · {{ pub.type }}{% endif %}
-          {% if pub.language %} · {{ pub.language }}{% endif %}
+          {% if pub.is_forthcoming %}<span class="pill">в&nbsp;печати</span>{% endif %}
+          <span>
+            {% if pub.type %} · {{ pub.type }}{% endif %}
+            {% if pub.language %} · {{ pub.language }}{% endif %}
+          </span>
         </p>
         {% if pub.abstract_ru or pub.abstract_en %}
           <p class="text-sm text-slate-500 mt-1 truncate-2">{{ pub.abstract_ru or pub.abstract_en }}</p>

@@ -128,6 +128,15 @@ async def _list_units(db: AsyncSession) -> list[str]:
 
 
 def _pub_to_dict(p: Publication, authors: list[AuthorRef] | None = None) -> dict[str, Any]:
+    # HSE publications API: raw.status == 2 → «accepted for publication» /
+    # forthcoming. Такие записи приходят с предполагаемым годом выхода
+    # (бывает в БУДУЩЕМ — отсюда статьи 2027 года в выдаче 2026-го).
+    # Дополнительно ставим флаг если year > текущего на всякий случай
+    # (некоторые status=1 тоже могут оказаться future-year по ошибке).
+    raw_status = str((p.raw or {}).get("status") or "")
+    is_forthcoming = raw_status == "2" or (
+        p.year is not None and p.year > datetime.now(timezone.utc).year
+    )
     return {
         "id": p.id,
         "title": p.title,
@@ -146,6 +155,7 @@ def _pub_to_dict(p: Publication, authors: list[AuthorRef] | None = None) -> dict
         "editors": p.editors or [],
         "translators": p.translators or [],
         "authors": authors or [],
+        "is_forthcoming": is_forthcoming,
     }
 
 

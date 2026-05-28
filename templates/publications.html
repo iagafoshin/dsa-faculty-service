@@ -48,11 +48,14 @@
         <span class="text-xs font-mono text-slate-400">{{ '%.3f'|format(pub.score) }}</span>
       {% endif %}
     </div>
-    <p class="text-xs text-slate-500 mt-1">
+    <p class="text-xs text-slate-500 mt-1 flex items-baseline gap-2 flex-wrap">
       {% if pub.year %}<b>{{ pub.year }}</b>{% endif %}
-      {% if pub.type %} · {{ pub.type }}{% endif %}
-      {% if pub.language %} · {{ pub.language }}{% endif %}
-      {% if pub.publisher %} · {{ pub.publisher }}{% endif %}
+      {% if pub.is_forthcoming %}<span class="pill">в&nbsp;печати</span>{% endif %}
+      <span>
+        {% if pub.type %} · {{ pub.type }}{% endif %}
+        {% if pub.language %} · {{ pub.language }}{% endif %}
+        {% if pub.publisher %} · {{ pub.publisher }}{% endif %}
+      </span>
     </p>
     {% if pub.authors %}
       <p class="text-sm text-slate-600 mt-1 italic">
