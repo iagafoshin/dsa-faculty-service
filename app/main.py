@@ -9,6 +9,7 @@ from app.admin import router as admin_router
 from app.config import settings
 from app.experts import router as experts_router
 from app.routes import router as v1_router
+from app.scheduler import shutdown_scheduler, start_scheduler_if_enabled
 from app.ui import router as ui_router
 
 logging.basicConfig(
@@ -69,3 +70,15 @@ app.include_router(admin_router, prefix="/api/v1/admin")
 # HTML UI на корневых путях (/, /persons, /publications, /persons/{id}).
 # JSON API остаётся под /api/v1/.
 app.include_router(ui_router)
+
+
+# === Scheduler (опциональный, активируется через ENV SCHEDULE_DAYS > 0) ===
+
+@app.on_event("startup")
+async def _startup_scheduler() -> None:
+    start_scheduler_if_enabled()
+
+
+@app.on_event("shutdown")
+async def _shutdown_scheduler() -> None:
+    shutdown_scheduler()

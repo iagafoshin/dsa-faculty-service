@@ -23,6 +23,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.admin_auth import require_admin_basic
 from app.database import AsyncSessionLocal, get_session
 from app.models import Authorship, Campus, Course, Person, Publication, ScrapeJob
 from app.routes import _attach_authors  # shared dict[str, list[AuthorRef]] builder
@@ -748,7 +749,12 @@ ADMIN_RUNNING_STATUSES = {
 
 
 @router.get("/admin", response_class=HTMLResponse)
-async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_session)):
+async def admin_dashboard(
+    request: Request,
+    _: str = Depends(require_admin_basic),
+    db: AsyncSession = Depends(get_session),
+):
+    from app.scheduler import get_schedule_info
     # Список последних 20 джобов
     rows = (await db.execute(
         select(ScrapeJob).order_by(ScrapeJob.started_at.desc()).limit(20)
@@ -758,6 +764,7 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_sessi
         "letters": ADMIN_LETTERS,
         "jobs": rows,
         "running_statuses": ADMIN_RUNNING_STATUSES,
+        "schedule_info": get_schedule_info(),
     })
 
 
@@ -767,6 +774,7 @@ async def admin_scrape_start(
     campus_ids: list[str] | None = Form(default=None),
     letters: str = Form(default=""),
     limit: str = Form(default=""),
+    _: str = Depends(require_admin_basic),
     db: AsyncSession = Depends(get_session),
 ):
     # Параметры из формы — нормализуем
@@ -800,7 +808,9 @@ async def admin_scrape_start(
 
 @router.get("/admin/scrape/{job_id}", response_class=HTMLResponse)
 async def admin_job_view(
-    request: Request, job_id: str, db: AsyncSession = Depends(get_session),
+    request: Request, job_id: str,
+    _: str = Depends(require_admin_basic),
+    db: AsyncSession = Depends(get_session),
 ):
     job = await db.get(ScrapeJob, job_id)
     if job is None:
@@ -812,7 +822,11 @@ async def admin_job_view(
 
 
 @router.post("/admin/scrape/{job_id}/cancel", response_class=HTMLResponse)
-async def admin_job_cancel(job_id: str, db: AsyncSession = Depends(get_session)):
+async def admin_job_cancel(
+    job_id: str,
+    _: str = Depends(require_admin_basic),
+    db: AsyncSession = Depends(get_session),
+):
     job = await db.get(ScrapeJob, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
