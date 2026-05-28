@@ -765,6 +765,13 @@ async def admin_dashboard(
     })
 
 
+def _parse_limit(raw: str) -> int | None:
+    try:
+        return int(raw) if raw.strip() else None
+    except ValueError:
+        return None
+
+
 @router.post("/admin/scrape", response_class=HTMLResponse)
 async def admin_scrape_start(
     background: BackgroundTasks,
@@ -772,13 +779,12 @@ async def admin_scrape_start(
     _: str = Depends(require_admin_basic),
     db: AsyncSession = Depends(get_session),
 ):
-    try:
-        limit_i: int | None = int(limit) if limit.strip() else None
-    except ValueError:
-        limit_i = None
-
-    job_id = str(uuid.uuid4())
-    job = ScrapeJob(
+    """Только скрейп профилей. ВКР и embedding'и НЕ пересчитываются —
+    для этого есть отдельная кнопка «Полное обновление».
+    """
+    limit_i = _parse_limit(limit)
+    job_id = f"manual-scrape-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    db.add(ScrapeJob(
         job_id=job_id,
         status=ScrapeStatus.queued.value,
         limit_count=limit_i,
@@ -786,16 +792,35 @@ async def admin_scrape_start(
         processed=0,
         total=None,
         started_at=datetime.now(timezone.utc),
-    )
-    db.add(job)
+    ))
     await db.commit()
 
     background.add_task(
         crawl_and_ingest,
         limit_i, None, None, job_id, AsyncSessionLocal,
     )
-    # 303 See Other — после POST уводит на GET страницы джоба
     return RedirectResponse(f"/admin/scrape/{job_id}", status_code=303)
+
+
+@router.post("/admin/full-update", response_class=HTMLResponse)
+async def admin_full_update_start(
+    background: BackgroundTasks,
+    limit: str = Form(default=""),
+    _: str = Depends(require_admin_basic),
+):
+    """Полный цикл: scrape → ВКР → enrich пустых embedding'ов.
+
+    Долго (минимум 30 мин, на полном пуле HSE ≈ 1.5–2ч). Регистрирует
+    запись `ScrapeJob` через `run_full_update` (job_id с префиксом
+    `manual-full-…`) — прогресс scrape видно в /admin, ВКР/enrich
+    логируются в stdout контейнера.
+    """
+    from app.scheduler import run_full_update
+    limit_i = _parse_limit(limit)
+    # Не ждём ответа — джоб длинный. job_id сформируется внутри run_full_update;
+    # пользователь увидит его в общем списке /admin сразу после редиректа.
+    background.add_task(run_full_update, limit_i, "manual-full")
+    return RedirectResponse("/admin", status_code=303)
 
 
 @router.get("/admin/scrape/{job_id}", response_class=HTMLResponse)

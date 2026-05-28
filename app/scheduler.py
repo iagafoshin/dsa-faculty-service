@@ -34,22 +34,33 @@ logger = logging.getLogger(__name__)
 _scheduler: AsyncIOScheduler | None = None
 
 
-async def _run_full_update() -> None:
-    """Один тик scheduled-джоба: scrape + ВКР + enrich пустых embedding'ов."""
+async def run_full_update(
+    limit: int | None = None,
+    job_id_prefix: str = "scheduled",
+) -> str:
+    """Полный цикл обновления: scrape → ВКР → enrich пустых embedding'ов.
+
+    `limit` — лимит профилей для крawler'а (None = вся HSE).
+    `job_id_prefix` — «scheduled» для авто-фаеров, «manual» для ручного
+    запуска из /admin (различимо в таблице джобов).
+
+    Возвращает `job_id` созданной записи `ScrapeJob`.
+    """
     from app.database import AsyncSessionLocal
     from app.models import ScrapeJob
     from app.schemas import ScrapeStatus
     from app.scraper.crawler import crawl_and_ingest
 
-    job_id = f"scheduled-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
-    logger.info("scheduled full-update job starting: %s", job_id)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    job_id = f"{job_id_prefix}-{ts}-{uuid.uuid4().hex[:6]}"
+    logger.info("full-update job starting: %s (limit=%s)", job_id, limit)
 
     # Записываем ScrapeJob в БД, чтобы было видно в /admin
     async with AsyncSessionLocal() as s:
         s.add(ScrapeJob(
             job_id=job_id,
             status=ScrapeStatus.queued.value,
-            limit_count=None,
+            limit_count=limit,
             campus_id=None,
             processed=0,
             total=None,
@@ -59,12 +70,12 @@ async def _run_full_update() -> None:
 
     try:
         await crawl_and_ingest(
-            limit=None, campus_ids=None, letters=None,
+            limit=limit, campus_ids=None, letters=None,
             job_id=job_id, session_factory=AsyncSessionLocal,
         )
     except Exception:
-        logger.exception("scheduled scrape failed (job %s)", job_id)
-        return
+        logger.exception("scrape failed (job %s)", job_id)
+        return job_id
 
     # ВКР + enrich лежат за NLP-стеком. Если он недоступен (прод-docker без
     # torch) — пропускаем, scrape отработал и это уже полезно.
@@ -74,7 +85,7 @@ async def _run_full_update() -> None:
     except ImportError:
         logger.info("ВКР-скрейпер недоступен в этой инсталляции; пропускаем")
     except Exception:
-        logger.exception("scheduled theses scrape failed")
+        logger.exception("theses scrape failed (job %s)", job_id)
 
     try:
         from app.nlp.__main__ import enrich_persons
@@ -82,9 +93,14 @@ async def _run_full_update() -> None:
     except ImportError:
         logger.info("NLP-стек недоступен в этой инсталляции; пропускаем enrich")
     except Exception:
-        logger.exception("scheduled enrich failed")
+        logger.exception("enrich failed (job %s)", job_id)
 
-    logger.info("scheduled full-update job done: %s", job_id)
+    logger.info("full-update job done: %s", job_id)
+    return job_id
+
+
+# Алиас для APScheduler — он зовёт без аргументов, дефолты подходят.
+_run_full_update = run_full_update
 
 
 def start_scheduler_if_enabled() -> AsyncIOScheduler | None:
