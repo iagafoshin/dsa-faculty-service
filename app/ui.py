@@ -311,17 +311,25 @@ async def home(
         like = f"%{q}%"
 
         # === Experts (vector) с пагинацией ===
+        # Для name-запросов («Паринов») вектор бессмысленный — фамилия не
+        # несёт семантики, в выдаче лезут случайные люди с похожими по
+        # эмбеддингу профилями. Пропускаем целиком — ILIKE-секция «по
+        # фамилии» отдаёт точные хиты.
         try:
-            # Запрашиваем page_size+1 чтобы понять, есть ли следующая страница.
-            exp_rows, top_pubs = await vector_search_persons(
-                db, q,
-                limit=_EXP_PAGE_SIZE + 1,
-                offset=(exp_page - 1) * _EXP_PAGE_SIZE,
-                campus_id=campus_id, primary_unit=faculty or None,
-            )
-            ctx["exp_has_next"] = (
-                len(exp_rows) > _EXP_PAGE_SIZE and exp_page < _EXP_MAX_PAGE
-            )
+            if is_name_query:
+                exp_rows: list[Any] = []
+                top_pubs: dict[int, list[Any]] = {}
+            else:
+                # Запрашиваем page_size+1 чтобы понять, есть ли следующая страница.
+                exp_rows, top_pubs = await vector_search_persons(
+                    db, q,
+                    limit=_EXP_PAGE_SIZE + 1,
+                    offset=(exp_page - 1) * _EXP_PAGE_SIZE,
+                    campus_id=campus_id, primary_unit=faculty or None,
+                )
+                ctx["exp_has_next"] = (
+                    len(exp_rows) > _EXP_PAGE_SIZE and exp_page < _EXP_MAX_PAGE
+                )
             exp_rows = exp_rows[:_EXP_PAGE_SIZE]
             exp_stats = await _fetch_card_stats(db, [p.person_id for p, _, _ in exp_rows])
             experts_list: list[dict[str, Any]] = []
@@ -360,53 +368,55 @@ async def home(
             await db.rollback()
             ctx["experts_error"] = str(e)
 
-        # === Publications (vector — для подбора курсача важен смысл, не подстрока) ===
-        try:
-            pub_rows = await vector_search_publications(db, q, limit=5)
-            pubs = [p for p, _ in pub_rows]
-            authors_by_pub = await _attach_authors(db, pubs)
-            ctx["publications"] = [
-                {
-                    **_pub_to_dict(p, authors_by_pub.get(p.id, [])),
-                    "score": score,
-                }
-                for p, score in pub_rows
-            ]
-            ctx["publications_total"] = len(pub_rows)
-        except Exception as e:
-            # Fallback на ILIKE если NLP-стек недоступен (прод-Docker без torch)
-            await db.rollback()
-            ctx["publications_error"] = str(e)
-            pubs = list((await db.execute(
-                select(Publication).where(Publication.title.ilike(like))
-                .order_by(Publication.year.desc().nullslast(), Publication.id.asc())
-                .limit(5)
-            )).scalars().all())
-            authors_by_pub = await _attach_authors(db, pubs)
-            ctx["publications"] = [
-                {**_pub_to_dict(p, authors_by_pub.get(p.id, [])), "score": None}
-                for p in pubs
-            ]
+        # === Publications + Courses ===
+        # Для name-запросов это бессмысленно (фамилия не появляется в title
+        # публикации/курса как осмысленная подстрока). Пропускаем целиком.
+        if not is_name_query:
+            try:
+                pub_rows = await vector_search_publications(db, q, limit=5)
+                pubs = [p for p, _ in pub_rows]
+                authors_by_pub = await _attach_authors(db, pubs)
+                ctx["publications"] = [
+                    {
+                        **_pub_to_dict(p, authors_by_pub.get(p.id, [])),
+                        "score": score,
+                    }
+                    for p, score in pub_rows
+                ]
+                ctx["publications_total"] = len(pub_rows)
+            except Exception as e:
+                # Fallback на ILIKE если NLP-стек недоступен (прод-Docker без torch)
+                await db.rollback()
+                ctx["publications_error"] = str(e)
+                pubs = list((await db.execute(
+                    select(Publication).where(Publication.title.ilike(like))
+                    .order_by(Publication.year.desc().nullslast(), Publication.id.asc())
+                    .limit(5)
+                )).scalars().all())
+                authors_by_pub = await _attach_authors(db, pubs)
+                ctx["publications"] = [
+                    {**_pub_to_dict(p, authors_by_pub.get(p.id, [])), "score": None}
+                    for p in pubs
+                ]
 
-        # Courses (ILIKE)
-        crs_q = (
-            select(Course, Person)
-            .join(Person, Person.person_id == Course.person_id)
-            .where(Course.title.ilike(like))
-            .order_by(Course.academic_year.desc().nullslast(), Course.id.desc())
-            .limit(5)
-        )
-        for c, p in (await db.execute(crs_q)).all():
-            ctx["courses"].append({
-                "course_id": c.id,
-                "title": c.title,
-                "academic_year": c.academic_year,
-                "level": c.level,
-                "language": c.language,
-                "person_id": p.person_id,
-                "person_name": p.full_name,
-                "person_unit": p.primary_unit,
-            })
+            crs_q = (
+                select(Course, Person)
+                .join(Person, Person.person_id == Course.person_id)
+                .where(Course.title.ilike(like))
+                .order_by(Course.academic_year.desc().nullslast(), Course.id.desc())
+                .limit(5)
+            )
+            for c, p in (await db.execute(crs_q)).all():
+                ctx["courses"].append({
+                    "course_id": c.id,
+                    "title": c.title,
+                    "academic_year": c.academic_year,
+                    "level": c.level,
+                    "language": c.language,
+                    "person_id": p.person_id,
+                    "person_name": p.full_name,
+                    "person_unit": p.primary_unit,
+                })
 
         # Persons (ILIKE по ФИО) — только преподаватели, как и vector
         # При name-режиме поднимаем лимит до 10 (юзер ищет конкретного человека —
