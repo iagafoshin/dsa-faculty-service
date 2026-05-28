@@ -63,23 +63,45 @@ def _score_tier(score: float) -> tuple[str, str] | None:
     return None
 
 
-# Определение «запрос похож на ФИО»: 1-3 слова, каждое начинается с заглавной
-# кириллицы (Иванов / Иванов И П / Кузнецов Сергей Олегович). Инициалы (1 буква)
-# тоже считаем словом. Английские буквы и lowercase → topic-запрос, даже если он
-# короткий («квантовая физика», «llm для финансов»).
+# Определение «запрос похож на ФИО».
+# Базовый случай — 1-3 слова с заглавной кириллицы («Иванов», «Кузнецов Сергей
+# Олегович», «Иванов И П»). Сюда же добавляем lowercase-вариант для одиночных
+# слов («паринов») — типичная опечатка, юзер ищет фамилию. Для 2+ слов lowercase
+# уже значит topic («машинное обучение»), не имя.
 _NAME_TOKEN_RE = re.compile(r"^[А-ЯЁ][а-яё]+\.?$|^[А-ЯЁ]\.?$")
+_LOWER_SURNAME_RE = re.compile(r"^[а-яё]{4,}$")
 
 
 def looks_like_name_query(q: str) -> bool:
     words = (q or "").strip().split()
     if not (1 <= len(words) <= 3):
         return False
-    return all(_NAME_TOKEN_RE.fullmatch(w) for w in words)
+    if all(_NAME_TOKEN_RE.fullmatch(w) for w in words):
+        return True
+    # Lowercase-фамилия одним словом — даём шанс ILIKE-секции.
+    if len(words) == 1 and _LOWER_SURNAME_RE.fullmatch(words[0]):
+        return True
+    return False
 
 
 async def _list_campuses(db: AsyncSession) -> list[dict[str, str]]:
     rows = (await db.execute(select(Campus).order_by(Campus.campus_name))).scalars().all()
     return [{"campus_id": r.campus_id, "campus_name": r.campus_name} for r in rows]
+
+
+async def _resolve_campus_id(db: AsyncSession, campus_input: str) -> str | None:
+    """Сопоставляет введённое имя кампуса с campus_id. Substring-match: «моск» →
+    «Москва» → её id. Возвращает None если ничего не нашли.
+    """
+    campus_input = (campus_input or "").strip()
+    if not campus_input:
+        return None
+    row = (await db.execute(
+        select(Campus.campus_id)
+        .where(Campus.campus_name.ilike(f"%{campus_input}%"))
+        .limit(1)
+    )).first()
+    return row[0] if row else None
 
 
 _UNIT_MIN_PERSONS = 30  # порог для datalist — мелочь типа «лаборатория …» только шумит
@@ -209,6 +231,10 @@ _BROWSE_PAGE_SIZE = 20
 async def home(
     request: Request,
     q: str | None = None,
+    # Кампус приходит как свободный текст ("моск" / "Санкт-Петербург") и
+    # резолвится в campus_id ниже. Старый параметр `campus_id=` поддерживаем
+    # для совместимости с закладками и редиректом со старого /persons.
+    campus: str | None = None,
     campus_id: str | None = None,
     faculty: str | None = None,
     exp_page: int = Query(1, ge=1, le=_EXP_MAX_PAGE),
@@ -219,6 +245,11 @@ async def home(
     db: AsyncSession = Depends(get_session),
 ):
     faculty = (faculty or "").strip()
+    campus = (campus or "").strip()
+    # Если пришёл свободный текст в `campus`, резолвим в id; иначе используем
+    # старый campus_id напрямую.
+    if campus and not campus_id:
+        campus_id = await _resolve_campus_id(db, campus)
     is_name_query = looks_like_name_query(q or "")
 
     def exp_page_url(new_page: int) -> str:
@@ -232,6 +263,7 @@ async def home(
         "request": request,
         "q": q,
         "campus_id": campus_id,
+        "campus": campus,
         "faculty": faculty,
         "is_name_query": is_name_query,
         "campuses": await _list_campuses(db),
@@ -311,25 +343,21 @@ async def home(
         like = f"%{q}%"
 
         # === Experts (vector) с пагинацией ===
-        # Для name-запросов («Паринов») вектор бессмысленный — фамилия не
-        # несёт семантики, в выдаче лезут случайные люди с похожими по
-        # эмбеддингу профилями. Пропускаем целиком — ILIKE-секция «по
-        # фамилии» отдаёт точные хиты.
+        # Вектор бежим всегда — но в шаблоне его секцию покажем как
+        # secondary («Возможно, по теме»), если ILIKE по фамилии что-то нашёл.
+        # Так и lowercase-фамилии («паринов»), и «правильные» topic-запросы
+        # обрабатываются единообразно.
         try:
-            if is_name_query:
-                exp_rows: list[Any] = []
-                top_pubs: dict[int, list[Any]] = {}
-            else:
-                # Запрашиваем page_size+1 чтобы понять, есть ли следующая страница.
-                exp_rows, top_pubs = await vector_search_persons(
-                    db, q,
-                    limit=_EXP_PAGE_SIZE + 1,
-                    offset=(exp_page - 1) * _EXP_PAGE_SIZE,
-                    campus_id=campus_id, primary_unit=faculty or None,
-                )
-                ctx["exp_has_next"] = (
-                    len(exp_rows) > _EXP_PAGE_SIZE and exp_page < _EXP_MAX_PAGE
-                )
+            # Запрашиваем page_size+1 чтобы понять, есть ли следующая страница.
+            exp_rows, top_pubs = await vector_search_persons(
+                db, q,
+                limit=_EXP_PAGE_SIZE + 1,
+                offset=(exp_page - 1) * _EXP_PAGE_SIZE,
+                campus_id=campus_id, primary_unit=faculty or None,
+            )
+            ctx["exp_has_next"] = (
+                len(exp_rows) > _EXP_PAGE_SIZE and exp_page < _EXP_MAX_PAGE
+            )
             exp_rows = exp_rows[:_EXP_PAGE_SIZE]
             exp_stats = await _fetch_card_stats(db, [p.person_id for p, _, _ in exp_rows])
             experts_list: list[dict[str, Any]] = []
@@ -368,55 +396,52 @@ async def home(
             await db.rollback()
             ctx["experts_error"] = str(e)
 
-        # === Publications + Courses ===
-        # Для name-запросов это бессмысленно (фамилия не появляется в title
-        # публикации/курса как осмысленная подстрока). Пропускаем целиком.
-        if not is_name_query:
-            try:
-                pub_rows = await vector_search_publications(db, q, limit=5)
-                pubs = [p for p, _ in pub_rows]
-                authors_by_pub = await _attach_authors(db, pubs)
-                ctx["publications"] = [
-                    {
-                        **_pub_to_dict(p, authors_by_pub.get(p.id, [])),
-                        "score": score,
-                    }
-                    for p, score in pub_rows
-                ]
-                ctx["publications_total"] = len(pub_rows)
-            except Exception as e:
-                # Fallback на ILIKE если NLP-стек недоступен (прод-Docker без torch)
-                await db.rollback()
-                ctx["publications_error"] = str(e)
-                pubs = list((await db.execute(
-                    select(Publication).where(Publication.title.ilike(like))
-                    .order_by(Publication.year.desc().nullslast(), Publication.id.asc())
-                    .limit(5)
-                )).scalars().all())
-                authors_by_pub = await _attach_authors(db, pubs)
-                ctx["publications"] = [
-                    {**_pub_to_dict(p, authors_by_pub.get(p.id, [])), "score": None}
-                    for p in pubs
-                ]
-
-            crs_q = (
-                select(Course, Person)
-                .join(Person, Person.person_id == Course.person_id)
-                .where(Course.title.ilike(like))
-                .order_by(Course.academic_year.desc().nullslast(), Course.id.desc())
+        # === Publications + Courses === (vector / ILIKE — fallback)
+        try:
+            pub_rows = await vector_search_publications(db, q, limit=5)
+            pubs = [p for p, _ in pub_rows]
+            authors_by_pub = await _attach_authors(db, pubs)
+            ctx["publications"] = [
+                {
+                    **_pub_to_dict(p, authors_by_pub.get(p.id, [])),
+                    "score": score,
+                }
+                for p, score in pub_rows
+            ]
+            ctx["publications_total"] = len(pub_rows)
+        except Exception as e:
+            # Fallback на ILIKE если NLP-стек недоступен (прод-Docker без torch)
+            await db.rollback()
+            ctx["publications_error"] = str(e)
+            pubs = list((await db.execute(
+                select(Publication).where(Publication.title.ilike(like))
+                .order_by(Publication.year.desc().nullslast(), Publication.id.asc())
                 .limit(5)
-            )
-            for c, p in (await db.execute(crs_q)).all():
-                ctx["courses"].append({
-                    "course_id": c.id,
-                    "title": c.title,
-                    "academic_year": c.academic_year,
-                    "level": c.level,
-                    "language": c.language,
-                    "person_id": p.person_id,
-                    "person_name": p.full_name,
-                    "person_unit": p.primary_unit,
-                })
+            )).scalars().all())
+            authors_by_pub = await _attach_authors(db, pubs)
+            ctx["publications"] = [
+                {**_pub_to_dict(p, authors_by_pub.get(p.id, [])), "score": None}
+                for p in pubs
+            ]
+
+        crs_q = (
+            select(Course, Person)
+            .join(Person, Person.person_id == Course.person_id)
+            .where(Course.title.ilike(like))
+            .order_by(Course.academic_year.desc().nullslast(), Course.id.desc())
+            .limit(5)
+        )
+        for c, p in (await db.execute(crs_q)).all():
+            ctx["courses"].append({
+                "course_id": c.id,
+                "title": c.title,
+                "academic_year": c.academic_year,
+                "level": c.level,
+                "language": c.language,
+                "person_id": p.person_id,
+                "person_name": p.full_name,
+                "person_unit": p.primary_unit,
+            })
 
         # Persons (ILIKE по ФИО) — только преподаватели, как и vector
         # При name-режиме поднимаем лимит до 10 (юзер ищет конкретного человека —
